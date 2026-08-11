@@ -27,6 +27,11 @@ let state = {
 let stepSize  = 50;       // 步進值 µs
 let isTestRunning = false;
 let testInterval = null;
+let settingsDirty = false;  // 設定頁輸入臟標記（防止 WebSocket 覆蓋）
+
+// ── 全站 Session ─────────────────────────────────────────────────
+let siteToken = localStorage.getItem('siteToken') || '';
+let siteAuthTimer = null;  // 自動鎖定計時器
 
 // ── Chart.js 圖表 ────────────────────────────────────────────
 let chartX = null, chartY = null;
@@ -508,10 +513,19 @@ function onYSlider(val) {
 // ── 步進值 ───────────────────────────────────────────────────
 function setStep(size) {
   stepSize = size;
-  document.querySelectorAll('.step-chip').forEach(el => {
+  document.querySelectorAll('#stepChipsX .step-chip').forEach(el => {
     el.classList.toggle('active', parseInt(el.textContent) === size);
   });
+  const ci = document.getElementById('stepCustomInput');
+  if (ci && document.activeElement !== ci) ci.value = size;
 }
+
+function setStepCustom(size) {
+  if (!size || size < 1) return;
+  stepSize = size;
+  document.querySelectorAll('#stepChipsX .step-chip').forEach(el => el.classList.remove('active'));
+}
+
 
 // ── 數位輸出 ─────────────────────────────────────────────────
 async function toggleVacuum() {
@@ -694,26 +708,199 @@ async function apiPost(url, body = {}) {
 
 function setElValue(id, val) {
   const el = document.getElementById(id);
-  if (el && document.activeElement !== el) el.value = val;
+  // settingsDirty 時跳過覆蓋（防止 WebSocket 100ms 廣播覆蓋使用者正在修改的值）
+  if (el && document.activeElement !== el && !settingsDirty) el.value = val;
 }
 
 // ── 進階設定套用 ────────────────────────────────────────────────
+function markSettingsDirty() { settingsDirty = true; }
+function clearSettingsDirty() { settingsDirty = false; }
+
 async function applyAdvancedLimits() {
-  const xMaxSpeed = parseFloat(document.getElementById('xMaxSpeedInput').value);
+  const xMaxSpeed   = parseFloat(document.getElementById('xMaxSpeedInput').value);
   const xAccelSteps = parseFloat(document.getElementById('xAccelStepsInput').value);
-  const xScale = parseFloat(document.getElementById('xScaleInput').value);
-  const yMaxSpeed = parseFloat(document.getElementById('yMaxSpeedInput').value);
+  const xScale      = parseFloat(document.getElementById('xScaleInput').value);
+  const yMaxSpeed   = parseFloat(document.getElementById('yMaxSpeedInput').value);
   const yAccelSteps = parseFloat(document.getElementById('yAccelStepsInput').value);
-  const yScale = parseFloat(document.getElementById('yScaleInput').value);
-  
+  const yScale      = parseFloat(document.getElementById('yScaleInput').value);
   const r = await apiPost('/api/set_limits', {
     x_max_speed: xMaxSpeed, x_accel_steps: xAccelSteps, x_scale: xScale,
     y_max_speed: yMaxSpeed, y_accel_steps: yAccelSteps, y_scale: yScale
   });
   if (r.ok) {
     toast('進階加減速與校準參數已套用！', 'success');
+    clearSettingsDirty();
   }
 }
+
+// ── 外觀設定 ────────────────────────────────────────────────────
+function previewFont() {
+  const family = document.getElementById('fontFamilySelect')?.value || "'Inter',sans-serif";
+  const size   = document.getElementById('fontSizeSlider')?.value || 14;
+  const prev   = document.getElementById('fontPreviewText');
+  if (prev) { prev.style.fontFamily = family; prev.style.fontSize = size + 'px'; }
+}
+
+function applyAppearance() {
+  const family = document.getElementById('fontFamilySelect')?.value || "'Inter',sans-serif";
+  const size   = parseInt(document.getElementById('fontSizeSlider')?.value || 14);
+  document.body.style.fontFamily = family;
+  document.body.style.fontSize   = size + 'px';
+  localStorage.setItem('uiFontFamily', family);
+  localStorage.setItem('uiFontSize',   size);
+  toast('外觀設定已套用！', 'success');
+}
+
+function resetAppearance() {
+  const def = "'Inter',sans-serif", sz = 14;
+  const sel = document.getElementById('fontFamilySelect');
+  const sld = document.getElementById('fontSizeSlider');
+  const lbl = document.getElementById('fontSizeLabel');
+  if (sel) sel.value = def;
+  if (sld) sld.value = sz;
+  if (lbl) lbl.textContent = sz;
+  document.body.style.fontFamily = def;
+  document.body.style.fontSize   = sz + 'px';
+  localStorage.removeItem('uiFontFamily');
+  localStorage.removeItem('uiFontSize');
+  previewFont();
+  toast('外觀已重置為預設', 'info');
+}
+
+function loadAppearanceFromStorage() {
+  const family = localStorage.getItem('uiFontFamily');
+  const size   = localStorage.getItem('uiFontSize');
+  if (family) {
+    document.body.style.fontFamily = family;
+    const sel = document.getElementById('fontFamilySelect');
+    if (sel) sel.value = family;
+  }
+  if (size) {
+    document.body.style.fontSize = size + 'px';
+    const sld = document.getElementById('fontSizeSlider');
+    const lbl = document.getElementById('fontSizeLabel');
+    if (sld) sld.value = size;
+    if (lbl) lbl.textContent = size;
+  }
+  previewFont();
+}
+
+// ── 安全設定 ────────────────────────────────────────────────────
+async function applySecuritySettings() {
+  const timeout = parseInt(document.getElementById('lockTimeoutInput')?.value || 30);
+  const newPwd  = document.getElementById('newPasswordInput')?.value || '';
+  const body    = { lock_timeout_min: timeout };
+  if (newPwd.trim().length >= 4) body.new_password = newPwd.trim();
+  const r = await apiPost('/api/settings/security', body);
+  if (r.ok) {
+    toast(`安全設定已套用！自動鎖定：${r.lock_timeout_min} 分鐘`, 'success');
+    document.getElementById('newPasswordInput').value = '';
+    resetAutoLockTimer(r.lock_timeout_min);
+    // 若是樹莓派環境，隱藏密碼修改區
+    if (r.is_raspberry_pi) {
+      const sec = document.getElementById('simPasswordSection');
+      if (sec) sec.style.opacity = '0.4';
+    }
+  }
+}
+
+// ── 自動鎖定計時器 ──────────────────────────────────────────────
+let _autoLockMs = 30 * 60 * 1000;
+
+function startAutoLockTimer(minutes) {
+  clearAutoLockTimer();
+  if (minutes != null) _autoLockMs = minutes * 60 * 1000;
+  siteAuthTimer = setTimeout(() => {
+    toast('閒置自動鎖定，請重新登入', 'warn');
+    siteLogout();
+  }, _autoLockMs);
+}
+
+function resetAutoLockTimer(minutes) { startAutoLockTimer(minutes || null); }
+function clearAutoLockTimer() { if (siteAuthTimer) { clearTimeout(siteAuthTimer); siteAuthTimer = null; } }
+
+// 任何使用者互動都重置鎖定倒數
+['click','keydown','mousemove','touchstart'].forEach(ev =>
+  document.addEventListener(ev, () => { if (siteToken) resetAutoLockTimer(); }, { passive: true })
+);
+
+// ── 全站登入/登出 ───────────────────────────────────────────────
+async function siteLogin(e) {
+  if (e) e.preventDefault();
+  const pwdEl = document.getElementById('siteLoginPassword');
+  const errEl = document.getElementById('siteLoginError');
+  const btn   = document.getElementById('siteLoginBtn');
+  const pwd   = pwdEl?.value || '';
+  if (!pwd) { if (errEl) errEl.textContent = '請輸入密碼'; return; }
+
+  if (btn) { btn.textContent = '驗證中...'; btn.disabled = true; }
+  const r = await apiPost('/api/auth/login', { password: pwd });
+  if (btn) { btn.disabled = false; btn.textContent = '🔓 登入系統'; }
+
+  if (r.ok && r.token) {
+    siteToken = r.token;
+    localStorage.setItem('siteToken', r.token);
+    terminalAuthToken = r.token;
+    sessionStorage.setItem('terminalToken', r.token);
+    hideSiteLoginOverlay();
+    startAutoLockTimer();
+    const logoutBtn = document.getElementById('btnGlobalLogout');
+    if (logoutBtn) logoutBtn.style.display = 'inline-block';
+    toast('🔓 登入成功！', 'success');
+    addLog('全站登入成功', 'success');
+  } else {
+    if (errEl) errEl.textContent = r.msg || '密碼錯誤，請重試';
+    if (pwdEl) { pwdEl.value = ''; pwdEl.focus(); }
+  }
+}
+
+async function siteLogout() {
+  if (!confirm('確定要登出系統嗎？')) return;
+  if (siteToken) await apiPost('/api/auth/logout', { token: siteToken });
+  siteToken = ''; terminalAuthToken = '';
+  localStorage.removeItem('siteToken');
+  sessionStorage.removeItem('terminalToken');
+  clearAutoLockTimer();
+  showSiteLoginOverlay();
+  const lb = document.getElementById('btnGlobalLogout');
+  if (lb) lb.style.display = 'none';
+  toast('🔒 已登出系統', 'info');
+}
+
+function showSiteLoginOverlay() {
+  const el = document.getElementById('globalLoginOverlay');
+  if (el) { el.style.display = 'flex'; el.style.opacity = '1'; }
+  setTimeout(() => document.getElementById('siteLoginPassword')?.focus(), 120);
+}
+
+function hideSiteLoginOverlay() {
+  const el = document.getElementById('globalLoginOverlay');
+  if (!el) return;
+  el.style.transition = 'opacity 0.4s';
+  el.style.opacity = '0';
+  setTimeout(() => { el.style.display = 'none'; el.style.removeProperty('opacity'); el.style.transition = ''; }, 420);
+}
+
+async function checkSiteAuthOnLoad() {
+  const token = localStorage.getItem('siteToken');
+  if (token) {
+    const r = await apiPost('/api/auth/status', { token });
+    if (r.ok && r.valid) {
+      siteToken = token;
+      terminalAuthToken = token;
+      sessionStorage.setItem('terminalToken', token);
+      hideSiteLoginOverlay();
+      startAutoLockTimer();
+      const lb = document.getElementById('btnGlobalLogout');
+      if (lb) lb.style.display = 'inline-block';
+      return;
+    }
+  }
+  siteToken = '';
+  localStorage.removeItem('siteToken');
+  showSiteLoginOverlay();
+}
+
 
 // ── 馬達鎖定/致能開關 ───────────────────────────────────────────
 async function toggleMotorLock() {
@@ -1142,7 +1329,45 @@ function stopGcode() {
   addLog("G-code 執行已被使用者終止", "warn");
 }
 
+// ── G-code 文字編輯器 ────────────────────────────────────────────
+function gcodeInsert(text) {
+  const editor = document.getElementById('gcodeDirectEditor');
+  if (!editor) return;
+  const start = editor.selectionStart;
+  const before = editor.value.substring(0, start);
+  const after  = editor.value.substring(editor.selectionEnd);
+  const needNL = before.length > 0 && !before.endsWith('\n');
+  editor.value = before + (needNL ? '\n' : '') + text + '\n' + after;
+  editor.focus();
+  editor.selectionStart = editor.selectionEnd = before.length + (needNL ? 1 : 0) + text.length + 1;
+}
+
+function drawGcodePathFromText() {
+  const text = document.getElementById('gcodeDirectEditor')?.value || '';
+  gcodeLines = text.split('\n');
+  drawGcodePath();
+  toast('路徑預覽已更新', 'info');
+}
+
+async function runGcodeFromText() {
+  const text = document.getElementById('gcodeDirectEditor')?.value || '';
+  if (!text.trim()) { toast('編輯器為空，請先輸入 G-code', 'error'); return; }
+  gcodeLines = text.split('\n');
+  const nameEl  = document.getElementById('gcodeFileName');
+  const totalEl = document.getElementById('gcodeTotalLines');
+  const progEl  = document.getElementById('gcodeProgress');
+  if (nameEl)  nameEl.textContent  = '編輯器直接輸入';
+  if (totalEl) totalEl.textContent = gcodeLines.length;
+  if (progEl)  progEl.textContent  = `0 / ${gcodeLines.length}`;
+  const runBtn = document.getElementById('btnRunGcode');
+  if (runBtn) runBtn.disabled = false;
+  drawGcodePath();
+  await runGcode();
+}
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+
 
 // ── Web 系統終端機與資安驗證 ─────────────────────────────────────
 let terminalAuthToken = sessionStorage.getItem('terminalToken') || "";
@@ -1319,6 +1544,90 @@ function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// ── GitHub 系統更新 ───────────────────────────────────────────────
+async function checkUpdate() {
+  const btn     = document.getElementById('btnCheckUpdate');
+  const pullBtn = document.getElementById('btnPullUpdate');
+  const badge   = document.getElementById('updateStatusBadge');
+  const localEl  = document.getElementById('updateLocalSha');
+  const remoteEl = document.getElementById('updateRemoteSha');
+  const msgEl    = document.getElementById('updateRemoteMsg');
+  const metaEl   = document.getElementById('updateRemoteMeta');
+
+  if (btn) { btn.textContent = '🔍 檢查中...'; btn.disabled = true; }
+  if (badge) { badge.textContent = '連線中'; badge.style.background = 'rgba(59,130,246,0.2)'; badge.style.color = 'var(--accent-cyan)'; }
+
+  try {
+    const r = await fetch('/api/update/check');
+    const data = await r.json();
+
+    if (!data.ok) {
+      if (badge) { badge.textContent = '❌ 無法連線'; badge.style.background = 'rgba(239,68,68,0.2)'; badge.style.color = 'var(--accent-red)'; }
+      toast(`無法連線至 GitHub: ${data.msg}`, 'error');
+      return;
+    }
+
+    if (localEl)  localEl.textContent  = data.local_sha  || '-';
+    if (remoteEl) remoteEl.textContent = data.remote_sha || '-';
+    if (msgEl)    msgEl.textContent    = `💬 ${data.remote_msg || ''}`;
+    if (metaEl)   metaEl.textContent   = `👤 ${data.remote_author} · 📅 ${data.remote_date} · 🌿 ${data.branch}`;
+
+    if (data.up_to_date) {
+      if (badge) { badge.textContent = '✅ 已是最新'; badge.style.background = 'rgba(34,197,94,0.2)'; badge.style.color = 'var(--accent-green)'; }
+      if (pullBtn) pullBtn.disabled = true;
+      toast('已是最新版本！', 'success');
+    } else {
+      if (badge) { badge.textContent = '🆙 有新版本'; badge.style.background = 'rgba(251,191,36,0.2)'; badge.style.color = 'var(--accent-amber)'; }
+      if (pullBtn) pullBtn.disabled = false;
+      toast(`有新版本可更新！(${data.local_sha} → ${data.remote_sha})`, 'warn');
+    }
+  } catch (e) {
+    toast(`檢查失敗: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = '🔍 檢查更新'; btn.disabled = false; }
+  }
+}
+
+async function pullUpdate() {
+  if (!siteToken) { toast('請先登入系統', 'error'); return; }
+  if (!confirm('⚠️ 確定要更新系統嗎？\n\n本地未提交的修改將被覆蓋，更新後服務可能短暫中斷。')) return;
+
+  const btn    = document.getElementById('btnPullUpdate');
+  const outEl  = document.getElementById('updateOutputPanel');
+  const badge  = document.getElementById('updateStatusBadge');
+  const autoRestart = document.getElementById('updateAutoRestart')?.checked ?? true;
+
+  if (btn) { btn.textContent = '⬇️ 更新中...'; btn.disabled = true; }
+  if (badge) { badge.textContent = '⏳ 更新中'; badge.style.background = 'rgba(59,130,246,0.2)'; badge.style.color = 'var(--accent-cyan)'; }
+  if (outEl) { outEl.style.display = 'block'; outEl.textContent = '⏳ 正在執行 git fetch + reset --hard，請稍候...\n'; }
+
+  toast('開始更新，請稍候...', 'warn');
+
+  try {
+    const r = await apiPost('/api/update/pull', { token: siteToken, restart: autoRestart });
+
+    if (outEl) outEl.textContent = r.output || r.msg || '(無輸出)';
+
+    if (r.ok) {
+      if (badge) { badge.textContent = '✅ 更新完成'; badge.style.background = 'rgba(34,197,94,0.2)'; badge.style.color = 'var(--accent-green)'; }
+      const localEl = document.getElementById('updateLocalSha');
+      if (localEl && r.sha) localEl.textContent = r.sha;
+      toast(r.msg || '更新成功！', 'success');
+      addLog(`系統更新完成 → ${r.sha || ''}`, 'success');
+      if (btn) { btn.textContent = '✅ 已更新'; btn.disabled = true; }
+    } else {
+      if (badge) { badge.textContent = '❌ 更新失敗'; badge.style.background = 'rgba(239,68,68,0.2)'; badge.style.color = 'var(--accent-red)'; }
+      toast(`更新失敗: ${r.msg}`, 'error');
+      if (btn) { btn.textContent = '⬇️ 下載並更新'; btn.disabled = false; }
+    }
+  } catch (e) {
+    toast(`更新例外: ${e.message}`, 'error');
+    if (btn) { btn.textContent = '⬇️ 下載並更新'; btn.disabled = false; }
+  }
+}
+
+
+
 // ── 時鐘 ─────────────────────────────────────────────────────
 function updateClock() {
   const el = document.getElementById('clockDisplay');
@@ -1363,19 +1672,28 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHistory();
   loadMacros();
   drawGcodePath();
-  checkTerminalAuthOnLoad();
+  loadAppearanceFromStorage();
 
+  // 設定頁輸入框監聽—標記 dirty，防止 WebSocket 覆蓋
+  ['xMaxSpeedInput','xAccelStepsInput','xScaleInput',
+   'yMaxSpeedInput','yAccelStepsInput','yScaleInput'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', markSettingsDirty);
+  });
+
+  // 終端機驗證密碼框 Enter 鍵
   const pwdInput = document.getElementById('terminalAuthPassword');
   if (pwdInput) {
     pwdInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        unlockTerminal(e);
-      }
+      if (e.key === 'Enter') { e.preventDefault(); unlockTerminal(e); }
     });
   }
 
   addLog('系統介面載入完成', 'success');
   addLog('使用 ← → ↑ ↓ 方向鍵快速控制馬達', 'info');
   addLog('V=吸盤切換 | Z=手臂切換 | H=全部歸零', 'info');
+
+  // 全站認證檢查（最後執行，可能會顯示登入遮罩）
+  checkSiteAuthOnLoad();
 });
+

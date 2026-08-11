@@ -13,6 +13,28 @@
 </head>
 <body>
 
+<!-- ── 全站登入遮罩 (Splash Lock) ── -->
+<div id="globalLoginOverlay" style="position:fixed;inset:0;z-index:9999;background:rgba(3,7,18,0.96);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center">
+  <div style="background:var(--bg-card);border:1px solid rgba(59,130,246,0.4);border-radius:20px;padding:52px 44px;max-width:440px;width:92%;text-align:center;box-shadow:0 30px 60px rgba(0,0,0,0.9),0 0 80px rgba(59,130,246,0.1)">
+    <div style="font-size:60px;margin-bottom:14px">🔐</div>
+    <div style="font-family:'Orbitron',monospace;font-size:22px;font-weight:700;color:var(--accent-cyan);letter-spacing:2px;margin-bottom:4px">SERVO CONTROLLER</div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:28px">Raspberry Pi Motor Control System &mdash; Secure Access</div>
+    <form onsubmit="siteLogin(event)" autocomplete="off">
+      <input type="password" id="siteLoginPassword" placeholder="輸入系統密碼..."
+        style="width:100%;padding:14px 16px;border-radius:8px;background:#060a10;border:1px solid var(--border);color:#f8fafc;font-size:15px;text-align:center;margin-bottom:14px;box-sizing:border-box;letter-spacing:2px"
+        autofocus>
+      <button type="submit" class="btn btn-primary" id="siteLoginBtn" style="width:100%;padding:14px;font-size:15px;font-weight:700;letter-spacing:1px;border-radius:8px">
+        🔓 登入系統
+      </button>
+    </form>
+    <div id="siteLoginError" style="margin-top:14px;color:var(--accent-red);font-size:13px;min-height:20px"></div>
+    <div style="margin-top:20px;font-size:11px;color:var(--text-dim);line-height:1.6">
+      模擬模式預設密碼：<code style="color:var(--accent-green);letter-spacing:1px">Nice</code><br>
+      樹莓派環境：請輸入 Linux 系統 sudo 密碼
+    </div>
+  </div>
+</div>
+
 <!-- ── 導航欄 ── -->
 <nav class="navbar">
   <div class="navbar-brand">
@@ -33,8 +55,7 @@
     </div>
     <div class="time-display" id="clockDisplay">--:--:--</div>
     <div style="display:flex;gap:6px;margin-left:6px">
-      <button class="btn btn-warning" onclick="cmdSystemPower('reboot')" title="重新啟動樹梅派" style="padding:4px 10px;font-size:11px">🔄 重啟</button>
-      <button class="btn btn-danger" onclick="cmdSystemPower('shutdown')" title="關閉樹梅派電源" style="padding:4px 10px;font-size:11px">⚡ 關機</button>
+      <button class="btn btn-warning" id="btnGlobalLogout" onclick="siteLogout()" title="登出系統" style="padding:4px 10px;font-size:11px;display:none">🔒 登出</button>
     </div>
   </div>
 </nav>
@@ -213,13 +234,18 @@
           </div>
           <button class="step-btn large" id="xRightBtn" onclick="moveAxis('x',1)" title="右移">▶</button>
         </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:6px">
           <span style="font-size:12px;color:var(--text-dim)">步進值 (µs):</span>
-          <div class="step-selector">
-            <button class="step-chip" onclick="setStep(10)">10</button>
-            <button class="step-chip active" onclick="setStep(50)">50</button>
-            <button class="step-chip" onclick="setStep(100)">100</button>
-            <button class="step-chip" onclick="setStep(200)">200</button>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <div class="step-selector" id="stepChipsX">
+              <button class="step-chip" onclick="setStep(10)">10</button>
+              <button class="step-chip active" onclick="setStep(50)">50</button>
+              <button class="step-chip" onclick="setStep(100)">100</button>
+              <button class="step-chip" onclick="setStep(200)">200</button>
+            </div>
+            <input type="number" id="stepCustomInput" min="1" max="2000" value="50" title="自訂步進值"
+              style="width:70px;padding:4px 8px;border-radius:4px;background:var(--bg-dark);color:var(--text-main);border:1px solid var(--border);font-size:12px;text-align:center"
+              oninput="setStepCustom(parseInt(this.value)||1)">
           </div>
         </div>
         <div class="divider"></div>
@@ -617,6 +643,131 @@
       </div>
     </div>
 
+    <!-- 外觀與字體設定 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title"><span class="icon">🎨</span>外觀與字體設定</div>
+      <div class="grid-2">
+        <div>
+          <h4 style="color:var(--accent-cyan);margin-bottom:12px">字體選擇</h4>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div>
+              <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">介面字體</label>
+              <select id="fontFamilySelect" onchange="previewFont()" style="width:100%;padding:8px;border-radius:6px;background:var(--bg-dark);color:var(--text-main);border:1px solid var(--border)">
+                <option value="'Inter',sans-serif">Inter（預設）</option>
+                <option value="'Roboto',sans-serif">Roboto</option>
+                <option value="'Outfit',sans-serif">Outfit</option>
+                <option value="'JetBrains Mono',monospace">JetBrains Mono（等寬）</option>
+                <option value="'Fira Code',monospace">Fira Code（等寬）</option>
+                <option value="'Roboto Mono',monospace">Roboto Mono（等寬）</option>
+                <option value="system-ui,sans-serif">系統預設</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div>
+          <h4 style="color:var(--accent-cyan);margin-bottom:12px">字體大小</h4>
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">基礎字型大小：<span id="fontSizeLabel">14</span>px</label>
+          <input type="range" id="fontSizeSlider" min="11" max="20" value="14" step="1" style="width:100%"
+            oninput="document.getElementById('fontSizeLabel').textContent=this.value;previewFont()">
+        </div>
+      </div>
+      <div style="margin-top:12px;padding:12px;background:#0d1117;border-radius:6px;font-size:12px;color:var(--text-dim)">
+        預覽：<span id="fontPreviewText" style="color:var(--text-main)">The quick brown fox jumps over the lazy dog. ABC abc 0123456789 中文預覽</span>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="applyAppearance()">✅ 套用外觀設定</button>
+        <button class="btn" onclick="resetAppearance()">↩️ 重置預設</button>
+      </div>
+    </div>
+
+    <!-- 安全設定 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title"><span class="icon">🔒</span>安全與存取設定</div>
+      <div class="grid-2">
+        <div>
+          <h4 style="color:var(--accent-cyan);margin-bottom:12px">自動鎖定時間</h4>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div>
+              <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">閒置自動鎖定時間（分鐘）</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="number" id="lockTimeoutInput" value="30" min="1" max="480" step="1"
+                  style="width:100px;padding:8px;border-radius:4px;background:var(--bg-dark);color:var(--text-main);border:1px solid var(--border)">
+                <span style="font-size:12px;color:var(--text-dim)">分鐘（1~480）</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="simPasswordSection">
+          <h4 style="color:var(--accent-amber);margin-bottom:12px">修改登入密碼</h4>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div>
+              <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">模擬模式：新密碼（至少4個字元）</label>
+              <input type="password" id="newPasswordInput" placeholder="輸入新密碼..."
+                style="width:100%;padding:8px;border-radius:4px;background:var(--bg-dark);color:var(--text-main);border:1px solid var(--border);box-sizing:border-box">
+            </div>
+            <div style="font-size:11px;color:var(--text-dim)">樹莓派環境下密碼為 Linux sudo 密碼，無法在此修改。</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:16px;display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="applySecuritySettings()">✅ 套用安全設定</button>
+      </div>
+    </div>
+
+    <!-- 系統管理 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title"><span class="icon">⚡</span>樹莓派系統管理</div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-warning" style="padding:10px 20px;font-size:13px" onclick="cmdSystemPower('reboot')">🔄 重新啟動系統 (Reboot)</button>
+        <button class="btn btn-danger" style="padding:10px 20px;font-size:13px" onclick="cmdSystemPower('shutdown')">⚡ 關閉樹莓派電源 (Shutdown)</button>
+        <span style="font-size:12px;color:var(--text-dim)">⚠️ 注意：實施關機後需手動重新拔插電源線方可重啟。</span>
+      </div>
+    </div>
+
+    <!-- 系統更新 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="justify-content:space-between">
+        <span><span class="icon">🔄</span>系統更新（GitHub）</span>
+        <a href="https://github.com/Nono0325/Nice" target="_blank"
+          style="font-size:11px;color:var(--accent-cyan);text-decoration:none">
+          📦 Nono0325/Nice ↗
+        </a>
+      </div>
+
+      <!-- 版本資訊列 -->
+      <div id="updateInfoPanel" style="background:#060a10;border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:12px;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div>
+            <span style="color:var(--text-dim)">本地版本：</span>
+            <code id="updateLocalSha" style="color:var(--accent-cyan)">-</code>
+            &nbsp;|&nbsp;
+            <span style="color:var(--text-dim)">最新版本：</span>
+            <code id="updateRemoteSha" style="color:var(--accent-green)">-</code>
+          </div>
+          <span id="updateStatusBadge" style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(100,100,100,0.3);color:var(--text-dim)">未檢查</span>
+        </div>
+        <div id="updateRemoteMsg" style="margin-top:8px;color:var(--text-main);font-style:italic">-</div>
+        <div id="updateRemoteMeta" style="margin-top:4px;color:var(--text-dim);font-size:11px">-</div>
+      </div>
+
+      <!-- 更新日誌輸出 -->
+      <div id="updateOutputPanel" style="display:none;background:#060a10;border-radius:8px;padding:12px;margin-bottom:14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:#94a3b8;white-space:pre-wrap;border:1px solid var(--border);max-height:150px;overflow-y:auto"></div>
+
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" id="btnCheckUpdate" onclick="checkUpdate()">🔍 檢查更新</button>
+        <button class="btn btn-success" id="btnPullUpdate" onclick="pullUpdate()" disabled style="padding:10px 20px">
+          ⬇️ 下載並更新
+        </button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer">
+          <input type="checkbox" id="updateAutoRestart" checked style="accent-color:var(--accent-cyan)">
+          更新後自動重啟服務
+        </label>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-dim)">
+        ⚠️ 更新使用 <code>git reset --hard</code>，本地未 commit 的修改將被覆蓋。樹莓派環境下更新後會自動重啟 servo-control 服務。
+      </div>
+    </div>
+
     <!-- GPIO 引腳對應圖 -->
     <div class="card" style="margin-top:16px">
       <div class="card-title"><span class="icon">📌</span>GPIO 引腳對應（BCM 編號）</div>
@@ -725,16 +876,6 @@
         </div>
       </div>
     </div>
-
-    <!-- 電源管理 -->
-    <div class="card" style="margin-top:16px">
-      <div class="card-title"><span class="icon">⚡</span>樹梅派電源管理</div>
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-warning" style="padding:10px 20px;font-size:13px" onclick="cmdSystemPower('reboot')">🔄 重新啟動系統 (Reboot)</button>
-        <button class="btn btn-danger" style="padding:10px 20px;font-size:13px" onclick="cmdSystemPower('shutdown')">⚡ 關閉樹梅派電源 (Shutdown)</button>
-        <span style="font-size:12px;color:var(--text-dim)">⚠️ 注意：實施關機後需手動重新拔插電源線方可重啟。</span>
-      </div>
-    </div>
   </div>
 
   <!-- ═══════════════════════════════════════════
@@ -819,6 +960,32 @@
         </div>
       </div>
     </div>
+
+    <!-- G-code 文字輸入編輯器 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="justify-content:space-between">
+        <span><span class="icon">📝</span>G-code 直接輸入編輯器</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="step-chip" onclick="gcodeInsert('G0 X0 Y0')">G0 移動</button>
+          <button class="step-chip" onclick="gcodeInsert('G1 X50 Y50 F800')">G1 切割</button>
+          <button class="step-chip" onclick="gcodeInsert('G28')">G28 歸零</button>
+          <button class="step-chip" onclick="gcodeInsert('M106')" style="color:var(--accent-green)">M106 吸盤ON</button>
+          <button class="step-chip" onclick="gcodeInsert('M107')" style="color:var(--accent-red)">M107 吸盤OFF</button>
+          <button class="step-chip" onclick="gcodeInsert('; 注釋文字')">; 注釋</button>
+        </div>
+      </div>
+      <textarea id="gcodeDirectEditor" rows="10"
+        style="width:100%;background:#060a10;color:#38bdf8;font-family:'JetBrains Mono',monospace;font-size:13px;padding:12px;border:1px solid var(--border);border-radius:8px;resize:vertical;box-sizing:border-box;margin-top:8px"
+        placeholder="; 在此輸入 G-code 指令，每行一個&#10;G28        ; 歸零&#10;G0 X0 Y0   ; 移動到原點&#10;G1 X100 Y50 F800  ; 直線插補&#10;M106       ; 吸盤開啟&#10;G1 X100 Y100&#10;M107       ; 吸盤關閉&#10;G28        ; 回原點"></textarea>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-success" id="btnRunGcodeText" onclick="runGcodeFromText()" style="padding:10px 20px">▶ 執行編輯器 G-code</button>
+        <button class="btn btn-warning" onclick="drawGcodePathFromText()">🗄️ 預覽路徑</button>
+        <button class="btn" onclick="document.getElementById('gcodeDirectEditor').value=''">🗑️ 清除</button>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text-dim)">
+        支援指令：G0/G1 X Y（移動）| G28（歸零）| M106（吸盤ON）| M107（吸盤OFF）| ;（注釋）
+      </div>
+    </div>
   </div>
 
   <!-- ═══════════════════════════════════════════
@@ -884,6 +1051,8 @@
         <button class="step-chip" onclick="quickTerminalCmd('uptime')">開機時間</button>
         <button class="step-chip" onclick="quickTerminalCmd('hostname -I')">IP 位址</button>
         <button class="step-chip" onclick="quickTerminalCmd('uname -a')">系統版本</button>
+        <button class="step-chip" onclick="quickTerminalCmd('pwd')">當前目錄</button>
+        <button class="step-chip" onclick="sendCtrlC()" style="background:rgba(239,68,68,0.15);border-color:var(--accent-red);color:var(--accent-red)">⚡ Ctrl+C</button>
       </div>
 
       <!-- 終端機螢幕 -->

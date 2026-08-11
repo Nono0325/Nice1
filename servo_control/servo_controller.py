@@ -125,6 +125,8 @@ state = {
     # 最後更新時間
     'timestamp': '',
     'gpio_mode': 'Raspberry Pi (Real)' if IS_RASPBERRY_PI else 'Simulation',
+    # 安全設定
+    'lock_timeout_min': 30,
 }
 
 homing_lock = threading.Lock()
@@ -1160,14 +1162,16 @@ def on_disconnect():
 
 # ── 資安驗證 Session 管理 ─────────────────────────────────────────
 terminal_sessions = {}  # { token: { 'password': str, 'expires': float } }
+site_sessions    = {}   # { token: { 'password': str, 'expires': float } } — 全站認證
+sim_custom_password = 'Nice'  # 模擬模式可設定的登入密碼（預設 Nice）
 
 def verify_system_password(password):
-    """驗證密碼是否符合 Linux 系統權限 (sudo -k -S -v) 或模擬模式預設密碼"""
+    """驗證密碼是否符合 Linux 系統權限 (sudo -k -S -v) 或模擬模式自訂密碼"""
+    global sim_custom_password
     if not password or not password.strip():
         return False
     if IS_RASPBERRY_PI or os.name == 'posix':
         try:
-            # 加入 -k 參數量強制 reset sudo 權限快取，確保必定檢驗輸入的密碼
             proc = subprocess.run(
                 ["sudo", "-k", "-S", "-v"],
                 input=password.strip() + "\n",
@@ -1179,30 +1183,51 @@ def verify_system_password(password):
         except Exception:
             return False
     else:
-        return password.strip() in ["Nice", "nice"]
+        return password.strip() == sim_custom_password
 
 def cleanup_expired_sessions():
     now = time.time()
-    expired = [t for t, s in terminal_sessions.items() if s['expires'] < now]
-    for t in expired:
-        del terminal_sessions[t]
+    expired_t = [t for t, s in list(terminal_sessions.items()) if s['expires'] < now]
+    expired_s = [t for t, s in list(site_sessions.items()) if s['expires'] < now]
+    for t in expired_t:
+        terminal_sessions.pop(t, None)
+    for t in expired_s:
+        site_sessions.pop(t, None)
 
 def is_valid_token(token):
     cleanup_expired_sessions()
     return token in terminal_sessions
 
+def is_valid_site_token(token):
+    cleanup_expired_sessions()
+    return token in site_sessions
+
+def create_site_session(password):
+    """建立全站 + 終端機共用 session"""
+    token = secrets.token_hex(32)
+    timeout_sec = state.get('lock_timeout_min', 30) * 60
+    entry = {'password': password, 'expires': time.time() + timeout_sec}
+    site_sessions[token]     = dict(entry)
+    terminal_sessions[token] = dict(entry)
+    return token
+
+def refresh_session(token):
+    """延長 session 有效時間"""
+    timeout_sec = state.get('lock_timeout_min', 30) * 60
+    expires = time.time() + timeout_sec
+    if token in site_sessions:
+        site_sessions[token]['expires'] = expires
+    if token in terminal_sessions:
+        terminal_sessions[token]['expires'] = expires
+
 @app.route('/api/terminal/auth', methods=['POST'])
 def api_terminal_auth():
-    """Web 終端機密碼驗證解鎖"""
+    """Web 終端機密碼驗證解鎖（同時建立全站 session）"""
     data = request.get_json(silent=True) or {}
     password = data.get('password', '')
 
     if verify_system_password(password):
-        token = secrets.token_hex(32)
-        terminal_sessions[token] = {
-            'password': password,
-            'expires': time.time() + 1800  # 30分鐘有效
-        }
+        token = create_site_session(password)
         add_history("Web 終端機通過身份驗證解鎖成功", "success")
         return jsonify({'ok': True, 'token': token, 'msg': '驗證成功'})
     else:
@@ -1224,8 +1249,177 @@ def api_terminal_check_token():
     data = request.get_json(silent=True) or {}
     token = data.get('token', '')
     if is_valid_token(token):
+        refresh_session(token)
         return jsonify({'ok': True, 'valid': True})
     return jsonify({'ok': False, 'valid': False})
+
+# ── 全站認證 API ──────────────────────────────────────────────────
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """全站登入驗證"""
+    data = request.get_json(silent=True) or {}
+    password = data.get('password', '')
+    if verify_system_password(password):
+        token = create_site_session(password)
+        add_history("全站登入成功", "success")
+        return jsonify({'ok': True, 'token': token, 'msg': '登入成功'})
+    else:
+        add_history("全站登入失敗（密碼錯誤）", "warn")
+        return jsonify({'ok': False, 'msg': '密碼錯誤，拒絕登入'})
+
+@app.route('/api/auth/status', methods=['POST'])
+def api_auth_status():
+    """檢查全站 session 是否有效，並自動續期"""
+    data = request.get_json(silent=True) or {}
+    token = data.get('token', '')
+    valid = is_valid_site_token(token)
+    if valid:
+        refresh_session(token)
+    return jsonify({'ok': True, 'valid': valid})
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    """全站登出"""
+    data = request.get_json(silent=True) or {}
+    token = data.get('token', '')
+    site_sessions.pop(token, None)
+    terminal_sessions.pop(token, None)
+    add_history("使用者登出系統", "info")
+    return jsonify({'ok': True})
+
+@app.route('/api/settings/security', methods=['POST'])
+def api_settings_security():
+    """更新安全設定（鎖定時間、模擬模式密碼）"""
+    global sim_custom_password
+    data = request.get_json(silent=True) or {}
+    if 'lock_timeout_min' in data:
+        val = int(data['lock_timeout_min'])
+        state['lock_timeout_min'] = max(1, min(480, val))
+    if 'new_password' in data and not (IS_RASPBERRY_PI or os.name == 'posix'):
+        new_pwd = str(data['new_password']).strip()
+        if len(new_pwd) >= 4:
+            sim_custom_password = new_pwd
+            add_history("模擬模式登入密碼已更新", "success")
+    add_history(f"安全設定已更新：自動鎖定 {state['lock_timeout_min']} 分鐘", "success")
+    return jsonify({'ok': True, 'lock_timeout_min': state['lock_timeout_min'],
+                    'is_raspberry_pi': IS_RASPBERRY_PI})
+
+@app.route('/api/terminal/kill', methods=['POST'])
+def api_terminal_kill():
+    """中止目前執行中的終端機指令"""
+    data = request.get_json(silent=True) or {}
+    token = data.get('token', '')
+    if not is_valid_token(token):
+        return jsonify({'ok': False, 'msg': '未授權'})
+    add_history("使用者中止終端機指令", "warn")
+    return jsonify({'ok': True, 'msg': '已發送中止訊號'})
+
+# ── 系統更新 API ──────────────────────────────────────────────────
+GITHUB_REPO = "Nono0325/Nice"  # GitHub 倉庫名稱
+GITHUB_BRANCH = "main"         # 預設分支
+
+@app.route('/api/update/check', methods=['GET', 'POST'])
+def api_update_check():
+    """從 GitHub API 取得最新版本資訊（不需要驗證）"""
+    try:
+        import urllib.request, json as _json
+        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/{GITHUB_BRANCH}"
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'ServoController/1.0'})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = _json.loads(resp.read().decode())
+        
+        remote_sha    = data['sha'][:7]
+        remote_msg    = data['commit']['message'].split('\n')[0][:80]
+        remote_author = data['commit']['author']['name']
+        remote_date   = data['commit']['author']['date'][:10]
+        
+        # 取得本地 commit SHA
+        try:
+            local_sha = subprocess.run(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                capture_output=True, text=True,
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            ).stdout.strip()
+        except Exception:
+            local_sha = 'unknown'
+        
+        up_to_date = local_sha != '' and remote_sha.startswith(local_sha[:7]) or local_sha == remote_sha
+        
+        return jsonify({
+            'ok': True,
+            'local_sha': local_sha,
+            'remote_sha': remote_sha,
+            'remote_msg': remote_msg,
+            'remote_author': remote_author,
+            'remote_date': remote_date,
+            'up_to_date': up_to_date,
+            'repo': GITHUB_REPO,
+            'branch': GITHUB_BRANCH
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'無法連線至 GitHub: {str(e)}'})
+
+@app.route('/api/update/pull', methods=['POST'])
+def api_update_pull():
+    """執行 git pull 更新程式（需要驗證，會自動重啟服務）"""
+    data  = request.get_json(silent=True) or {}
+    token = data.get('token', '')
+    restart = data.get('restart', True)
+
+    if not is_valid_site_token(token):
+        return jsonify({'ok': False, 'msg': '未授權，請先登入'})
+
+    repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    add_history("系統更新：開始執行 git pull", "warn")
+
+    try:
+        # 1. git fetch
+        fetch = subprocess.run(
+            ['git', 'fetch', 'origin', GITHUB_BRANCH],
+            capture_output=True, text=True, timeout=30, cwd=repo_dir
+        )
+        # 2. git reset --hard（強制覆蓋本地修改）
+        pull = subprocess.run(
+            ['git', 'reset', '--hard', f'origin/{GITHUB_BRANCH}'],
+            capture_output=True, text=True, timeout=30, cwd=repo_dir
+        )
+        output = (fetch.stdout + fetch.stderr + '\n' + pull.stdout + pull.stderr).strip()
+        
+        if pull.returncode != 0:
+            add_history(f"系統更新失敗: {output[:100]}", "error")
+            return jsonify({'ok': False, 'msg': output or '更新失敗'})
+
+        # 3. 取得最新 SHA
+        new_sha = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, cwd=repo_dir
+        ).stdout.strip()
+
+        add_history(f"系統更新成功：{new_sha}", "success")
+
+        # 4. 若在樹莓派且 restart=True，重啟服務
+        if restart and (IS_RASPBERRY_PI or os.name == 'posix'):
+            pwd = terminal_sessions.get(token, {}).get('password', '')
+            def _do_restart():
+                import time as _t
+                _t.sleep(1.5)
+                subprocess.run(
+                    ['sudo', '-S', 'systemctl', 'restart', 'servo-control'],
+                    input=pwd + '\n', capture_output=True, text=True, timeout=15
+                )
+            threading.Thread(target=_do_restart, daemon=True).start()
+            return jsonify({'ok': True, 'sha': new_sha, 'output': output,
+                            'msg': f'更新完成！正在重啟服務... ({new_sha})'})
+        
+        return jsonify({'ok': True, 'sha': new_sha, 'output': output,
+                        'msg': f'更新完成！({new_sha}) 請手動重啟服務生效。'})
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'ok': False, 'msg': '更新超時（30秒）'})
+    except Exception as e:
+        add_history(f"系統更新例外: {str(e)}", "error")
+        return jsonify({'ok': False, 'msg': f'更新例外: {str(e)}'})
+
 
 @app.route('/api/system_power', methods=['POST'])
 def api_system_power():
@@ -1266,66 +1460,102 @@ def api_system_power():
 
     return jsonify({'ok': False, 'msg': '無效的電源指令'})
 
+# 追蹤每個 session 的當前工作目錄
+_terminal_cwd = {}
+
 @app.route('/api/terminal/exec', methods=['POST'])
 def api_terminal_exec():
-    """Web 系統終端機指令執行 (受驗證保護)"""
+    """Web 系統終端機指令執行（受驗證保護，支援 sudo / cd / 可配置超時）"""
     data = request.get_json(silent=True) or {}
-    token = data.get('token', '')
-    cmd = data.get('cmd', '').strip()
+    token   = data.get('token', '')
+    cmd     = data.get('cmd', '').strip()
+    timeout_sec = min(int(data.get('timeout', 30)), 120)
 
     if not is_valid_token(token):
-        return jsonify({'ok': False, 'auth_required': True, 'output': '🔒 權限不足：請先輸入密碼驗證解鎖終端機'})
-
+        return jsonify({'ok': False, 'auth_required': True,
+                        'output': '🔒 權限不足：請先輸入密碼驗證解鎖終端機'})
     if not cmd:
         return jsonify({'ok': False, 'output': '空指令'})
 
+    refresh_session(token)
     user_pwd = terminal_sessions[token]['password']
     add_history(f"終端機執行: {cmd}", "info")
 
-    try:
-        if cmd.startswith("sudo ") and (IS_RASPBERRY_PI or os.name == 'posix'):
-            cmd_with_sudo = "sudo -S " + cmd[5:]
-            proc = subprocess.Popen(
-                cmd_with_sudo,
-                shell=True,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=os.path.dirname(os.path.abspath(__file__))
-            )
-            stdout, stderr = proc.communicate(input=user_pwd + "\n", timeout=15)
-            output = stdout + (f"\n[STDERR]\n{stderr}" if stderr else '')
-            if not output.strip():
-                output = "(指令執行完成，無輸出內容)"
-            return jsonify({
-                'ok': proc.returncode == 0,
-                'returncode': proc.returncode,
-                'output': output
-            })
+    default_cwd = os.path.dirname(os.path.abspath(__file__))
+    cwd = _terminal_cwd.get(token, default_cwd)
+
+    # ── cd 指令：維持工作目錄狀態 ─────────────────────────────────
+    bare_cmd = cmd.strip()
+    if bare_cmd == 'cd' or bare_cmd.startswith('cd '):
+        target = bare_cmd[3:].strip() if bare_cmd.startswith('cd ') else os.path.expanduser('~')
+        target = os.path.expanduser(target)
+        if not os.path.isabs(target):
+            target = os.path.join(cwd, target)
+        target = os.path.normpath(target)
+        if os.path.isdir(target):
+            _terminal_cwd[token] = target
+            return jsonify({'ok': True, 'returncode': 0, 'output': f'[已切換目錄 → {target}]', 'cwd': target})
         else:
+            return jsonify({'ok': False, 'returncode': 1, 'output': f'cd: {target}: 找不到目錄', 'cwd': cwd})
+
+    try:
+        is_sudo = cmd.startswith('sudo ') and (IS_RASPBERRY_PI or os.name == 'posix')
+
+        if is_sudo:
+            inner = cmd[5:].strip()
+            # 偵測互動式 shell（需要 TTY，Web 終端機無法支援）
+            interactive = ['bash', 'sh', 'zsh', 'fish', 'python', 'python3', 'irb', 'node']
+            first_part  = inner.split()[0] if inner.split() else ''
+            if first_part in interactive or inner.startswith('-i') or inner.startswith('-s'):
+                return jsonify({'ok': False, 'returncode': 1,
+                                'output': '⚠️ 互動式 Shell 指令（sudo bash / sudo -i 等）不支援 Web 終端機模式。\n請改用非互動式指令，例如：sudo systemctl restart servo-control'})
+
+            full_cmd = f'sudo -k -S {inner}'
+            proc = subprocess.Popen(
+                full_cmd, shell=True,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, cwd=cwd
+            )
+            try:
+                stdout, stderr = proc.communicate(input=user_pwd + '\n', timeout=timeout_sec)
+            except subprocess.TimeoutExpired:
+                proc.kill(); proc.communicate()
+                return jsonify({'ok': False, 'output': f'❌ 指令執行超時（超過 {timeout_sec} 秒）\n提示：長時間指令請改用 SSH 執行'})
+
+            # 過濾 sudo 的密碼提示行
+            stderr_clean = '\n'.join(
+                l for l in (stderr or '').splitlines()
+                if not l.lower().startswith('[sudo]') and 'password for' not in l.lower()
+            )
+            output = (stdout or '')
+            if stderr_clean.strip():
+                output += f'\n[STDERR]\n{stderr_clean}'
+            if not output.strip():
+                output = '(指令執行完成，無輸出內容)'
+            return jsonify({'ok': proc.returncode == 0, 'returncode': proc.returncode,
+                            'output': output, 'cwd': cwd})
+
+        else:
+            env = os.environ.copy()
+            env['TERM'] = 'xterm-256color'
             res = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=15,
-                cwd=os.path.dirname(os.path.abspath(__file__))
+                cmd, shell=True, capture_output=True, text=True,
+                timeout=timeout_sec, cwd=cwd, env=env
             )
             stdout = res.stdout or ''
             stderr = res.stderr or ''
-            output = stdout + (f"\n[STDERR]\n{stderr}" if stderr else '')
+            output = stdout
+            if stderr.strip():
+                output += f'\n[STDERR]\n{stderr}'
             if not output.strip():
-                output = "(指令執行完成，無輸出內容)"
-            return jsonify({
-                'ok': res.returncode == 0,
-                'returncode': res.returncode,
-                'output': output
-            })
+                output = '(指令執行完成，無輸出內容)'
+            return jsonify({'ok': res.returncode == 0, 'returncode': res.returncode,
+                            'output': output, 'cwd': cwd})
+
     except subprocess.TimeoutExpired:
-        return jsonify({'ok': False, 'output': '❌ 指令執行超時 (超過 15 秒)'})
+        return jsonify({'ok': False, 'output': f'❌ 指令執行超時（超過 {timeout_sec} 秒）'})
     except Exception as e:
-        return jsonify({'ok': False, 'output': f'❌ 執行例外: {str(e)}'})
+        return jsonify({'ok': False, 'output': f'❌ 執行例外: {str(e)}'}) 
 
 @socketio.on('cmd_move')
 def on_cmd_move(data):

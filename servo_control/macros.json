@@ -1,0 +1,32 @@
+{
+  "自動搬運範例": [
+    "# 歸零與準備",
+    "HOME",
+    "DELAY 1000",
+    "# 移動至取料點",
+    "MOVE X 2000",
+    "MOVE Y 1500",
+    "DELAY 500",
+    "# 下降並吸取",
+    "ARM DOWN",
+    "DELAY 1000",
+    "VACUUM ON",
+    "DELAY 500",
+    "ARM UP",
+    "DELAY 1000",
+    "# 移動至放料點",
+    "MOVE X 1000",
+    "MOVE Y 1000",
+    "DELAY 500",
+    "# 下降並釋放",
+    "ARM DOWN",
+    "DELAY 1000",
+    "VACUUM OFF",
+    "DELAY 500",
+    "ARM UP",
+    "DELAY 1000",
+    "# 完成並回原點",
+    "HOME",
+    "MSG 搬運任務已完成！"
+  ]
+}

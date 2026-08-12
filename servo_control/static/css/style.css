@@ -13,9 +13,9 @@
   --bg-card2:     #1e293b;
   --border:       #2a3a55;
   --border-glow:  #3b82f6;
-  --text-primary: #e2e8f0;
-  --text-sec:     #94a3b8;
-  --text-dim:     #475569;
+  --text-primary: #f1f5f9;
+  --text-sec:     #cbd5e1;
+  --text-dim:     #64748b;
   --accent-blue:  #3b82f6;
   --accent-cyan:  #06b6d4;
   --accent-green: #10b981;
@@ -23,26 +23,28 @@
   --accent-red:   #ef4444;
   --accent-purple:#8b5cf6;
   --btn-metal:    linear-gradient(145deg, #374151, #1f2937);
-  --shadow-glow:  0 0 20px rgba(59,130,246,0.25);
-  --shadow-card:  0 4px 24px rgba(0,0,0,0.4);
-  --radius:       12px;
-  --radius-sm:    8px;
+  --shadow-glow:  0 0 24px rgba(59,130,246,0.3);
+  --shadow-card:  0 6px 28px rgba(0,0,0,0.45);
+  --radius:       14px;
+  --radius-sm:    10px;
 }
 
 /* ── 全域重置 ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; font-size: 16px; }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background: var(--bg-dark);
   color: var(--text-primary);
   min-height: 100vh;
   overflow-x: hidden;
+  font-size: 16px;
+  line-height: 1.5;
   background-image:
-    radial-gradient(ellipse at 20% 10%, rgba(59,130,246,0.08) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 90%, rgba(6,182,212,0.06) 0%, transparent 60%);
+    radial-gradient(ellipse at 20% 10%, rgba(59,130,246,0.1) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 90%, rgba(6,182,212,0.08) 0%, transparent 60%);
 }
 
 /* ── 掃描線動畫（工業感） ── */
@@ -63,11 +65,11 @@ body::before {
 
 /* ── 頂部導航 ── */
 .navbar {
-  background: rgba(17,24,39,0.95);
-  backdrop-filter: blur(12px);
+  background: rgba(17,24,39,0.96);
+  backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border);
-  padding: 0 24px;
-  height: 60px;
+  padding: 0 28px;
+  height: 68px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -79,31 +81,32 @@ body::before {
 .navbar-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .navbar-logo {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-  border-radius: 8px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 22px;
+  box-shadow: 0 0 16px rgba(6,182,212,0.4);
 }
 
 .navbar-title {
   font-family: 'Orbitron', monospace;
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 19px;
+  font-weight: 800;
   color: var(--accent-cyan);
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
 }
 
 .navbar-subtitle {
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 13px;
+  color: var(--text-sec);
   letter-spacing: 2px;
   text-transform: uppercase;
 }
@@ -111,20 +114,21 @@ body::before {
 .navbar-status {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
 }
 
 .status-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 500;
   color: var(--text-sec);
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--accent-red);
   animation: blink 1.5s ease-in-out infinite;
@@ -137,52 +141,53 @@ body::before {
 }
 @keyframes pulse-green {
   0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.6); }
-  50% { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+  50% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
 }
 
 .time-display {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--accent-cyan);
 }
 
 /* ── Tab 導航 ── */
 .tab-nav {
   display: flex;
-  gap: 4px;
-  padding: 16px 24px 0;
+  gap: 6px;
+  padding: 16px 28px 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
 }
 
 .tab-btn {
-  padding: 10px 20px;
+  padding: 14px 26px;
   border: none;
   background: transparent;
-  color: var(--text-dim);
-  font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--text-sec);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 600;
   cursor: pointer;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
   transition: all 0.2s;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
-.tab-btn:hover { color: var(--text-primary); background: rgba(59,130,246,0.08); }
+.tab-btn:hover { color: var(--text-primary); background: rgba(59,130,246,0.12); }
 .tab-btn.active {
-  color: var(--accent-blue);
-  border-bottom-color: var(--accent-blue);
-  background: rgba(59,130,246,0.1);
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+  background: rgba(6,182,212,0.14);
 }
 
 /* ── 主容器 ── */
 .main-container {
-  padding: 20px 24px;
-  max-width: 1600px;
+  padding: 24px 28px;
+  max-width: 1680px;
   margin: 0 auto;
   position: relative;
   z-index: 1;
@@ -192,16 +197,16 @@ body::before {
 .tab-content.active { display: block; }
 
 /* ── 網格佈局 ── */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-.grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+.grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
 
 /* ── 卡片 ── */
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: 24px;
   box-shadow: var(--shadow-card);
   position: relative;
   overflow: hidden;
@@ -213,7 +218,7 @@ body::before {
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: linear-gradient(90deg, transparent, var(--accent-blue), transparent);
   opacity: 0;
   transition: opacity 0.3s;
@@ -221,26 +226,26 @@ body::before {
 .card:hover::before { opacity: 1; }
 
 .card-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dim);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-sec);
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .card-title .icon {
-  width: 20px;
-  height: 20px;
-  background: rgba(59,130,246,0.15);
-  border-radius: 4px;
+  width: 26px;
+  height: 26px;
+  background: rgba(59,130,246,0.18);
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 /* ── PPT 風格：START / STOP 金屬按鈕 ── */
@@ -248,9 +253,9 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 60px;
+  gap: 70px;
   margin-bottom: 32px;
-  padding: 24px;
+  padding: 28px;
   background: var(--bg-card2);
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -260,21 +265,21 @@ body::before {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .metal-btn-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   color: var(--text-sec);
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
 }
 
 /* 金屬質感按鈕 */
 .metal-btn {
-  width: 80px;
-  height: 80px;
+  width: 96px;
+  height: 96px;
   border-radius: 50%;
   border: none;
   cursor: pointer;
@@ -288,69 +293,69 @@ body::before {
 .metal-btn-start {
   background: radial-gradient(circle at 35% 35%, #4a5568, #2d3748 50%, #1a202c);
   box-shadow:
-    0 6px 20px rgba(0,0,0,0.5),
-    inset 0 2px 4px rgba(255,255,255,0.1),
-    inset 0 -2px 4px rgba(0,0,0,0.4),
-    0 0 0 4px #374151,
-    0 0 0 6px #2d3748;
+    0 8px 24px rgba(0,0,0,0.6),
+    inset 0 2px 4px rgba(255,255,255,0.15),
+    inset 0 -2px 4px rgba(0,0,0,0.5),
+    0 0 0 5px #374151,
+    0 0 0 8px #2d3748;
 }
 
 .metal-btn-start:hover {
   box-shadow:
-    0 6px 20px rgba(16,185,129,0.3),
-    inset 0 2px 4px rgba(255,255,255,0.1),
-    inset 0 -2px 4px rgba(0,0,0,0.4),
-    0 0 0 4px #374151,
-    0 0 0 6px #2d3748,
-    0 0 30px rgba(16,185,129,0.2);
+    0 8px 24px rgba(16,185,129,0.35),
+    inset 0 2px 4px rgba(255,255,255,0.2),
+    inset 0 -2px 4px rgba(0,0,0,0.5),
+    0 0 0 5px #374151,
+    0 0 0 8px #2d3748,
+    0 0 35px rgba(16,185,129,0.3);
 }
 
 .metal-btn-start.active {
   background: radial-gradient(circle at 35% 35%, #34d399, #059669 50%, #047857);
   box-shadow:
-    0 6px 20px rgba(16,185,129,0.4),
-    inset 0 2px 4px rgba(255,255,255,0.2),
-    inset 0 -2px 4px rgba(0,0,0,0.3),
-    0 0 0 4px #065f46,
-    0 0 0 6px #064e3b,
-    0 0 40px rgba(16,185,129,0.3);
+    0 8px 24px rgba(16,185,129,0.5),
+    inset 0 2px 4px rgba(255,255,255,0.3),
+    inset 0 -2px 4px rgba(0,0,0,0.4),
+    0 0 0 5px #065f46,
+    0 0 0 8px #064e3b,
+    0 0 50px rgba(16,185,129,0.5);
 }
 
 .metal-btn-stop {
   background: radial-gradient(circle at 35% 35%, #4a5568, #2d3748 50%, #1a202c);
   box-shadow:
-    0 6px 20px rgba(0,0,0,0.5),
-    inset 0 2px 4px rgba(255,255,255,0.1),
-    inset 0 -2px 4px rgba(0,0,0,0.4),
-    0 0 0 4px #374151,
-    0 0 0 6px #2d3748;
+    0 8px 24px rgba(0,0,0,0.6),
+    inset 0 2px 4px rgba(255,255,255,0.15),
+    inset 0 -2px 4px rgba(0,0,0,0.5),
+    0 0 0 5px #374151,
+    0 0 0 8px #2d3748;
 }
 
 .metal-btn-stop:hover {
   box-shadow:
-    0 6px 20px rgba(239,68,68,0.3),
-    inset 0 2px 4px rgba(255,255,255,0.1),
-    inset 0 -2px 4px rgba(0,0,0,0.4),
-    0 0 0 4px #374151,
-    0 0 0 6px #2d3748;
+    0 8px 24px rgba(239,68,68,0.35),
+    inset 0 2px 4px rgba(255,255,255,0.2),
+    inset 0 -2px 4px rgba(0,0,0,0.5),
+    0 0 0 5px #374151,
+    0 0 0 8px #2d3748;
 }
 
 .metal-btn-stop.active {
   background: radial-gradient(circle at 35% 35%, #f87171, #dc2626 50%, #991b1b);
   box-shadow:
-    0 6px 20px rgba(239,68,68,0.4),
-    inset 0 2px 4px rgba(255,255,255,0.2),
-    inset 0 -2px 4px rgba(0,0,0,0.3),
-    0 0 0 4px #7f1d1d,
-    0 0 0 6px #6b0000,
-    0 0 40px rgba(239,68,68,0.3);
+    0 8px 24px rgba(239,68,68,0.5),
+    inset 0 2px 4px rgba(255,255,255,0.3),
+    inset 0 -2px 4px rgba(0,0,0,0.4),
+    0 0 0 5px #7f1d1d,
+    0 0 0 8px #6b0000,
+    0 0 50px rgba(239,68,68,0.5);
 }
 
-.metal-btn:active { transform: scale(0.95); }
+.metal-btn:active { transform: scale(0.94); }
 
 .metal-btn-icon {
-  font-size: 28px;
-  color: rgba(255,255,255,0.7);
+  font-size: 34px;
+  color: rgba(255,255,255,0.85);
   pointer-events: none;
 }
 
@@ -359,8 +364,8 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 40px;
-  margin-bottom: 24px;
+  gap: 48px;
+  margin-bottom: 28px;
   flex-wrap: wrap;
 }
 
@@ -368,20 +373,21 @@ body::before {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .indicator-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--text-sec);
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
 }
 
 /* 圓形指示燈 */
 .indicator-lamp {
-  width: 64px;
-  height: 64px;
+  width: 76px;
+  height: 76px;
   border-radius: 50%;
   position: relative;
   cursor: default;
@@ -391,51 +397,51 @@ body::before {
 .indicator-lamp.off {
   background: radial-gradient(circle at 35% 35%, #374151, #1f2937 60%, #111827);
   box-shadow:
-    0 4px 12px rgba(0,0,0,0.5),
-    inset 0 2px 4px rgba(255,255,255,0.05),
-    inset 0 -2px 4px rgba(0,0,0,0.4),
-    0 0 0 3px #2d3748,
-    0 0 0 5px #1f2937;
+    0 6px 16px rgba(0,0,0,0.6),
+    inset 0 2px 4px rgba(255,255,255,0.08),
+    inset 0 -2px 4px rgba(0,0,0,0.5),
+    0 0 0 4px #2d3748,
+    0 0 0 6px #1f2937;
 }
 
 .indicator-lamp.amber {
   background: radial-gradient(circle at 35% 35%, #fcd34d, #f59e0b 50%, #d97706);
   box-shadow:
-    0 4px 12px rgba(245,158,11,0.5),
-    inset 0 2px 4px rgba(255,255,255,0.3),
-    inset 0 -2px 4px rgba(0,0,0,0.2),
-    0 0 0 3px #92400e,
-    0 0 0 5px #78350f,
-    0 0 30px rgba(245,158,11,0.4);
+    0 6px 16px rgba(245,158,11,0.55),
+    inset 0 2px 4px rgba(255,255,255,0.4),
+    inset 0 -2px 4px rgba(0,0,0,0.3),
+    0 0 0 4px #92400e,
+    0 0 0 6px #78350f,
+    0 0 35px rgba(245,158,11,0.5);
   animation: lamp-pulse-amber 1.5s ease-in-out infinite;
 }
 
 .indicator-lamp.green {
   background: radial-gradient(circle at 35% 35%, #6ee7b7, #10b981 50%, #059669);
   box-shadow:
-    0 4px 12px rgba(16,185,129,0.5),
-    inset 0 2px 4px rgba(255,255,255,0.3),
-    inset 0 -2px 4px rgba(0,0,0,0.2),
-    0 0 0 3px #065f46,
-    0 0 0 5px #064e3b,
-    0 0 30px rgba(16,185,129,0.4);
+    0 6px 16px rgba(16,185,129,0.55),
+    inset 0 2px 4px rgba(255,255,255,0.4),
+    inset 0 -2px 4px rgba(0,0,0,0.3),
+    0 0 0 4px #065f46,
+    0 0 0 6px #064e3b,
+    0 0 35px rgba(16,185,129,0.5);
 }
 
 .indicator-lamp.red {
   background: radial-gradient(circle at 35% 35%, #fca5a5, #ef4444 50%, #dc2626);
   box-shadow:
-    0 4px 12px rgba(239,68,68,0.5),
-    inset 0 2px 4px rgba(255,255,255,0.3),
-    inset 0 -2px 4px rgba(0,0,0,0.2),
-    0 0 0 3px #7f1d1d,
-    0 0 0 5px #6b0000,
-    0 0 30px rgba(239,68,68,0.4);
-    animation: lamp-pulse-red 0.8s ease-in-out infinite;
+    0 6px 16px rgba(239,68,68,0.55),
+    inset 0 2px 4px rgba(255,255,255,0.4),
+    inset 0 -2px 4px rgba(0,0,0,0.3),
+    0 0 0 4px #7f1d1d,
+    0 0 0 6px #6b0000,
+    0 0 35px rgba(239,68,68,0.5);
+  animation: lamp-pulse-red 0.8s ease-in-out infinite;
 }
 
 @keyframes lamp-pulse-amber {
-  0%, 100% { box-shadow: 0 4px 12px rgba(245,158,11,0.5), inset 0 2px 4px rgba(255,255,255,0.3), 0 0 0 3px #92400e, 0 0 0 5px #78350f, 0 0 30px rgba(245,158,11,0.4); }
-  50% { box-shadow: 0 4px 12px rgba(245,158,11,0.7), inset 0 2px 4px rgba(255,255,255,0.3), 0 0 0 3px #92400e, 0 0 0 5px #78350f, 0 0 50px rgba(245,158,11,0.6); }
+  0%, 100% { box-shadow: 0 6px 16px rgba(245,158,11,0.5), inset 0 2px 4px rgba(255,255,255,0.3), 0 0 0 4px #92400e, 0 0 0 6px #78350f, 0 0 35px rgba(245,158,11,0.4); }
+  50% { box-shadow: 0 6px 16px rgba(245,158,11,0.7), inset 0 2px 4px rgba(255,255,255,0.3), 0 0 0 4px #92400e, 0 0 0 6px #78350f, 0 0 55px rgba(245,158,11,0.7); }
 }
 
 @keyframes lamp-pulse-red {
@@ -443,101 +449,112 @@ body::before {
   50% { opacity: 0.6; }
 }
 
-/* ── PPT 風格：X 軸位置滑桿 ── */
+/* ── PPT 風格：X/Y 軸位置軌跡 ── */
 .position-bar-section {
   background: var(--bg-card2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
-  margin-bottom: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
 }
 
 .position-bar-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .position-bar-labels {
   display: flex;
   justify-content: space-between;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-sec);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 /* 工業感進度槽 */
 .position-track {
-  height: 32px;
+  height: 40px;
   background: linear-gradient(180deg, #0d1117, #1a2235);
   border: 1px solid #2a3a55;
-  border-radius: 4px;
+  border-radius: 6px;
   position: relative;
   overflow: hidden;
-  box-shadow: inset 0 2px 8px rgba(0,0,0,0.5);
+  box-shadow: inset 0 3px 10px rgba(0,0,0,0.6);
 }
 
 .position-track-inner {
   height: 100%;
   background: linear-gradient(90deg, #0f4c8a, #1a6bb5, #2196f3, #42a5f5);
-  border-radius: 3px;
+  border-radius: 5px;
   position: relative;
-  transition: width 0.1s ease;
-  box-shadow: 0 0 12px rgba(59,130,246,0.4);
+  transition: width 0.12s ease;
+  box-shadow: 0 0 16px rgba(59,130,246,0.5);
 }
 
 .position-track-inner::after {
   content: '';
   position: absolute;
-  top: 3px;
-  left: 4px;
-  right: 4px;
-  height: 4px;
-  background: linear-gradient(90deg, rgba(255,255,255,0.3), transparent);
-  border-radius: 2px;
-}
-
-.position-tick {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  top: 4px;
+  left: 6px;
+  right: 6px;
+  height: 5px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.4), transparent);
+  border-radius: 3px;
 }
 
 .position-tick-line {
-  width: 1px;
-  height: 8px;
-  background: rgba(255,255,255,0.15);
+  width: 2px;
+  height: 12px;
+  background: rgba(255,255,255,0.25);
 }
 
 .position-value-display {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 32px;
+  font-weight: 800;
   color: var(--accent-cyan);
   text-align: center;
-  text-shadow: 0 0 20px rgba(6,182,212,0.5);
+  text-shadow: 0 0 25px rgba(6,182,212,0.6);
+}
+
+.position-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(59,130,246,0.25);
+  border: 1px solid var(--accent-blue);
+  padding: 4px 14px;
+  border-radius: 8px;
+}
+
+.position-sub-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dim);
 }
 
 /* ── 控制按鈕 ── */
 .btn {
-  padding: 10px 20px;
+  padding: 12px 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-card2);
   color: var(--text-primary);
-  font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  font-weight: 500;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 10px;
 }
 
 .btn:hover { background: var(--bg-card); border-color: var(--accent-blue); color: var(--accent-blue); }
@@ -548,64 +565,64 @@ body::before {
   border-color: #3b82f6;
   color: white;
 }
-.btn-primary:hover { background: linear-gradient(135deg, #2563eb, #3b82f6); box-shadow: 0 0 20px rgba(59,130,246,0.3); color: white; }
+.btn-primary:hover { background: linear-gradient(135deg, #2563eb, #3b82f6); box-shadow: 0 0 24px rgba(59,130,246,0.4); color: white; }
 
 .btn-success {
   background: linear-gradient(135deg, #065f46, #059669);
   border-color: #10b981;
   color: white;
 }
-.btn-success:hover { background: linear-gradient(135deg, #059669, #10b981); box-shadow: 0 0 20px rgba(16,185,129,0.3); color: white; }
+.btn-success:hover { background: linear-gradient(135deg, #059669, #10b981); box-shadow: 0 0 24px rgba(16,185,129,0.4); color: white; }
 
 .btn-danger {
   background: linear-gradient(135deg, #7f1d1d, #dc2626);
   border-color: #ef4444;
   color: white;
 }
-.btn-danger:hover { background: linear-gradient(135deg, #dc2626, #ef4444); box-shadow: 0 0 20px rgba(239,68,68,0.3); color: white; }
+.btn-danger:hover { background: linear-gradient(135deg, #dc2626, #ef4444); box-shadow: 0 0 24px rgba(239,68,68,0.4); color: white; }
 
 .btn-warning {
   background: linear-gradient(135deg, #78350f, #d97706);
   border-color: #f59e0b;
   color: white;
 }
-.btn-warning:hover { background: linear-gradient(135deg, #d97706, #f59e0b); box-shadow: 0 0 20px rgba(245,158,11,0.3); color: white; }
+.btn-warning:hover { background: linear-gradient(135deg, #d97706, #f59e0b); box-shadow: 0 0 24px rgba(245,158,11,0.4); color: white; }
 
 .btn-amber-toggle {
   background: radial-gradient(circle at 35% 35%, #374151, #1f2937 60%, #111827);
-  border: 2px solid #374151;
+  border: 3px solid #374151;
   border-radius: 50%;
-  width: 56px;
-  height: 56px;
+  width: 68px;
+  height: 68px;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.05);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.08);
 }
 
 .btn-amber-toggle.on {
   background: radial-gradient(circle at 35% 35%, #fcd34d, #f59e0b 50%, #d97706);
   border-color: #92400e;
-  box-shadow: 0 4px 12px rgba(245,158,11,0.4), 0 0 24px rgba(245,158,11,0.3);
+  box-shadow: 0 6px 16px rgba(245,158,11,0.5), 0 0 30px rgba(245,158,11,0.4);
 }
-.btn-amber-toggle:active { transform: scale(0.93); }
+.btn-amber-toggle:active { transform: scale(0.92); }
 
 /* ── 步進控制 ── */
 .step-control {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .step-btn {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-card2);
   color: var(--text-primary);
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 800;
   cursor: pointer;
   transition: all 0.15s;
   display: flex;
@@ -613,68 +630,48 @@ body::before {
   justify-content: center;
 }
 
-.step-btn:hover { background: rgba(59,130,246,0.15); border-color: var(--accent-blue); color: var(--accent-blue); }
+.step-btn:hover { background: rgba(59,130,246,0.2); border-color: var(--accent-blue); color: var(--accent-blue); }
 .step-btn:active { transform: scale(0.9); }
-.step-btn.large { width: 56px; height: 56px; font-size: 24px; border-radius: 10px; }
+.step-btn.large { width: 74px; height: 74px; font-size: 32px; border-radius: 14px; }
 
 /* ── 數值顯示 ── */
 .value-display {
   font-family: 'JetBrains Mono', monospace;
   background: #0d1117;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 16px;
+  border-radius: 8px;
+  padding: 10px 20px;
   color: var(--accent-cyan);
-  font-size: 16px;
-  font-weight: 600;
-  min-width: 100px;
+  font-size: 20px;
+  font-weight: 700;
+  min-width: 120px;
   text-align: center;
-  box-shadow: inset 0 2px 6px rgba(0,0,0,0.4);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.5);
+}
+
+.value-display.large-text {
+  font-size: 28px;
+  font-weight: 800;
+  padding: 12px 24px;
 }
 
 /* ── 輸入框 ── */
-input[type="range"] {
-  -webkit-appearance: none;
-  width: 100%;
-  height: 6px;
-  background: var(--bg-dark);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  outline: none;
-}
-
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #06b6d4);
-  cursor: pointer;
-  box-shadow: 0 0 10px rgba(59,130,246,0.5);
-  border: 2px solid rgba(255,255,255,0.2);
-  transition: all 0.2s;
-}
-
-input[type="range"]::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 16px rgba(59,130,246,0.7);
-  transform: scale(1.15);
-}
-
-input[type="number"], input[type="text"] {
+input[type="number"], input[type="text"], select {
   background: #0d1117;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text-primary);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  padding: 8px 12px;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 10px 16px;
   outline: none;
   transition: border-color 0.2s;
 }
 
-input[type="number"]:focus, input[type="text"]:focus {
+input[type="number"]:focus, input[type="text"]:focus, select:focus {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.2);
 }
 
 /* ── PWM 波形 Canvas ── */
@@ -914,30 +911,31 @@ canvas.gauge { display: block; }
 /* ── 步進值選擇 ── */
 .step-selector {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
 }
 
 .step-chip {
-  padding: 4px 10px;
-  border-radius: 4px;
+  padding: 8px 16px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-sec);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
 }
 
-.step-chip:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
-.step-chip.active { background: rgba(59,130,246,0.15); border-color: var(--accent-blue); color: var(--accent-cyan); }
+.step-chip:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(59,130,246,0.1); }
+.step-chip.active { background: rgba(59,130,246,0.2); border-color: var(--accent-blue); color: var(--accent-cyan); box-shadow: 0 0 12px rgba(6,182,212,0.3); }
 
 /* ── 分隔線 ── */
 .divider {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--border), transparent);
-  margin: 16px 0;
+  margin: 20px 0;
 }
 
 /* ── 懸停彩色光效 ── */
@@ -948,20 +946,20 @@ canvas.gauge { display: block; }
 
 /* ── Section 標題 ── */
 .section-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .section-title::before {
   content: '';
   display: block;
-  width: 3px;
-  height: 16px;
+  width: 4px;
+  height: 20px;
   background: var(--accent-blue);
   border-radius: 2px;
 }

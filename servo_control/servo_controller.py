@@ -73,10 +73,14 @@ def pulse_to_duty(pulse_us):
 
 # ── 系統狀態 ──────────────────────────────────────────────────────
 state = {
-    # 馬達當前位置 (對應 500~2500)
+    # 馬達當前位置 (對應 500~2500 µs)
     'x_pulse':  PULSE_CENTER,
     'y1_pulse': PULSE_CENTER,
     'y2_pulse': PULSE_CENTER,
+
+    # 物理座標 mm
+    'x_mm': 100.0,
+    'y_mm': 100.0,
 
     # 轉換成百分比 0~100 (0=LEFT/DOWN, 100=RIGHT/UP)
     'x_pct':  50.0,
@@ -99,11 +103,15 @@ state = {
     'error':         False,
     'error_msg':     '',
 
-    # 範圍與物理比例設定
+    # 範圍與物理比例設定 (µs 與 mm)
     'x_min': PULSE_MIN,
     'x_max': PULSE_MAX,
     'y_min': PULSE_MIN,
     'y_max': PULSE_MAX,
+    'x_min_mm': 0.0,
+    'x_max_mm': 200.0,
+    'y_min_mm': 0.0,
+    'y_max_mm': 200.0,
     'x_scale': 10.0,    # 10 µs 對應 1 mm (500~2500 行程 = 0~200 mm)
     'y_scale': 10.0,
 
@@ -112,6 +120,7 @@ state = {
     'x_accel_steps': 100.0,
     'y_max_speed': 2000.0,
     'y_accel_steps': 100.0,
+    'homing_speed_hz': 400.0,  # 緩慢穩定歸零頻率
 
     # 致能狀態
     'motor_locked': True,
@@ -152,10 +161,9 @@ class StepperMotor:
         self.current_pos = float(PULSE_CENTER)
         self.target_pos = float(PULSE_CENTER)
         self.steps_per_unit = 5.0  # 1 us 單元對應 5 個步進脈衝
+        self.lock = threading.Lock()
         
         # 速度規劃參數
-        # ⚠️ 注意：標準 Linux kernel 下 Python time.sleep() 精度約為 1~10ms，
-        #    在真實 Pi 上超過 ~500Hz 將導致脈衝不穩。正式生產建議改用 pigpio 硬體 DMA 脈衝。
         self.max_speed_hz = 2000.0
         self.min_speed_hz = 200.0
         self.accel_steps = 100.0
@@ -163,7 +171,7 @@ class StepperMotor:
         
         self.enabled = True
         self.running = True
-        # [修正1] 歸零時暫停背景執行緒以避免競態條件 (Race Condition)
+        # 歸零時暫停背景執行緒以避免競態條件
         self.pause_for_homing = False
         
         if IS_RASPBERRY_PI:
@@ -174,23 +182,32 @@ class StepperMotor:
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
-    def set_target(self, target):
-        self.target_pos = max(500.0, min(2500.0, float(target)))
+    def set_target(self, target, min_us=500.0, max_us=2500.0):
+        with self.lock:
+            self.target_pos = max(float(min_us), min(float(max_us), float(target)))
+            return self.target_pos
+
+    def add_target_delta(self, delta_us, min_us=500.0, max_us=2500.0):
+        """累加移動量（支援 100+100 快速連續點擊，不被實時當前位置覆蓋）"""
+        with self.lock:
+            self.target_pos = max(float(min_us), min(float(max_us), self.target_pos + float(delta_us)))
+            return self.target_pos
 
     def set_position(self, pos):
-        self.current_pos = float(pos)
-        self.target_pos = float(pos)
+        with self.lock:
+            self.current_pos = float(pos)
+            self.target_pos = float(pos)
 
     def set_enable(self, value):
         self.enabled = value
         if IS_RASPBERRY_PI:
-            # 共陰極接線下，ENA- 接地，ENA+ (GPIO) 輸出 LOW 鎖定馬達，輸出 HIGH 釋放馬達手推
             GPIO.output(self.ena_pin, GPIO.LOW if value else GPIO.HIGH)
 
     def halt(self):
-        """[修正1] 立即停止：將目標位置設為當前位置，並重置速度"""
-        self.target_pos = self.current_pos
-        self.current_speed_hz = self.min_speed_hz
+        """立即停止：將目標位置設為當前位置，並重置速度"""
+        with self.lock:
+            self.target_pos = self.current_pos
+            self.current_speed_hz = self.min_speed_hz
 
     def _run(self):
         while self.running:
@@ -370,7 +387,7 @@ def read_limit_switches():
             state['lim_up']    = y_stepper.current_pos >= state['y_max'] - 10
 
 def _home_single_axis(axis_name):
-    """單軸高速高精度歸零處理（含微秒脈衝控制與即時位置廣播）"""
+    """單軸平穩精準歸零（參考步進馬達設定緩慢歸零，避免撞擊）"""
     global x_stepper, y_stepper
     stepper = x_stepper if axis_name == 'x' else y_stepper
     if not stepper:
@@ -380,20 +397,21 @@ def _home_single_axis(axis_name):
     state_lim_key = 'lim_left' if axis_name == 'x' else 'lim_down'
     min_pos = state['x_min'] if axis_name == 'x' else state['y_min']
     
+    # 參考步進馬達設定之緩慢歸零頻率 (預設 350~450 Hz)
+    homing_hz = max(150.0, min(800.0, float(state.get('homing_speed_hz', 400.0))))
+    step_interval = 1.0 / homing_hz
+    
     if IS_RASPBERRY_PI:
         stepper.pause_for_homing = True
         time.sleep(0.02)  # 等待背景迴圈進入暫停狀態
         try:
-            # 致能並設定負方向
+            # 致能並設定負方向 (朝原點前進)
             GPIO.output(stepper.ena_pin, GPIO.LOW)
             GPIO.output(stepper.dir_pin, GPIO.LOW)
             
-            # 高速逼近限位開關 (2500 Hz: 每步 400µs)
-            target_hz = 2500.0
-            step_interval = 1.0 / target_hz
             steps = 0
-            max_steps = 12000  # 安全最大脈衝數
-            step_val = 1.0 / stepper.steps_per_unit  # 1 步對應 Position unit
+            max_steps = 15000  # 安全最大脈衝數
+            step_val = 1.0 / stepper.steps_per_unit
             
             while steps < max_steps:
                 if not GPIO.input(lim_pin):  # 低電位觸發 (PUD_UP)
@@ -412,7 +430,6 @@ def _home_single_axis(axis_name):
                 steps += 1
                 stepper.current_pos = max(min_pos, stepper.current_pos - step_val)
                 
-                # 先 sleep 釋放 GIL（保留最後 200µs 做忙等精準補正），避免長期佔用 GIL 凍結 SocketIO
                 t_rem = (t_step_start + step_interval) - time.perf_counter()
                 if t_rem > 0.0002:
                     time.sleep(t_rem - 0.0002)
@@ -423,11 +440,11 @@ def _home_single_axis(axis_name):
                 add_history(f"{axis_name.upper()} 軸歸零警告: 超時未觸發現位開關", "warn")
                 print(f"[HOME] Warning: {axis_name.upper()} axis homing step limit reached")
             else:
-                add_history(f"{axis_name.upper()} 軸觸發現位開關", "info")
+                add_history(f"{axis_name.upper()} 軸平穩觸發現位開關", "info")
 
-            # 退開限位開關 (Back-off 250 步 @ 1000 Hz ~0.25s)
+            # 緩慢平穩退開限位開關 (Back-off 250 步 @ 300 Hz)
             GPIO.output(stepper.dir_pin, GPIO.HIGH)  # 正方向向右/向上
-            backoff_interval = 1.0 / 1000.0
+            backoff_interval = 1.0 / 300.0
             for _ in range(250):
                 t_b_start = time.perf_counter()
                 GPIO.output(stepper.pul_pin, GPIO.HIGH)
@@ -436,7 +453,6 @@ def _home_single_axis(axis_name):
                     pass
                 GPIO.output(stepper.pul_pin, GPIO.LOW)
                 
-                # 先 sleep 釋放 GIL（保留最後 200µs 做忙等精準補正）
                 t_rem = (t_b_start + backoff_interval) - time.perf_counter()
                 if t_rem > 0.0002:
                     time.sleep(t_rem - 0.0002)
@@ -447,12 +463,20 @@ def _home_single_axis(axis_name):
         finally:
             stepper.pause_for_homing = False
     else:
-        # 模擬模式：瞬間回原點
-        stepper.set_position(min_pos)
-        time.sleep(0.1)
+        # 模擬模式：平滑逐步回原點（展示慢速歸零效果）
+        stepper.pause_for_homing = True
+        try:
+            start_pos = stepper.current_pos
+            steps_cnt = 25
+            for i in range(steps_cnt):
+                stepper.current_pos = start_pos - (start_pos - min_pos) * ((i + 1) / steps_cnt)
+                time.sleep(0.04)
+            stepper.set_position(min_pos)
+        finally:
+            stepper.pause_for_homing = False
 
     stepper.set_target(min_pos)
-    add_history(f"{axis_name.upper()} 軸歸零完成 (已回原點 0%)", "success")
+    add_history(f"{axis_name.upper()} 軸緩慢歸零完成 (已回原點 0.0 mm)", "success")
 
 
 def home_axis(axis='all'):
@@ -493,14 +517,22 @@ def broadcast_state():
     sim_t = 0
     while True:
         try:
-            # 同步實時馬達位置與百分比至系統狀態中
+            # 同步實時馬達位置與百分比、物理 mm 座標至系統狀態中
             if x_stepper:
                 state['x_pulse'] = int(x_stepper.current_pos)
                 state['x_pct'] = max(0.0, min(100.0, (x_stepper.current_pos - state['x_min']) / max(1, state['x_max'] - state['x_min']) * 100.0))
+                state['x_mm'] = round(max(0.0, (x_stepper.current_pos - PULSE_MIN) / max(0.1, state['x_scale'])), 1)
             if y_stepper:
                 state['y1_pulse'] = int(y_stepper.current_pos)
                 state['y2_pulse'] = int(y_stepper.current_pos)
                 state['y_pct'] = max(0.0, min(100.0, (y_stepper.current_pos - state['y_min']) / max(1, state['y_max'] - state['y_min']) * 100.0))
+                state['y_mm'] = round(max(0.0, (y_stepper.current_pos - PULSE_MIN) / max(0.1, state['y_scale'])), 1)
+
+            # 計算當前 mm 極限
+            state['x_min_mm'] = round((state['x_min'] - PULSE_MIN) / max(0.1, state['x_scale']), 1)
+            state['x_max_mm'] = round((state['x_max'] - PULSE_MIN) / max(0.1, state['x_scale']), 1)
+            state['y_min_mm'] = round((state['y_min'] - PULSE_MIN) / max(0.1, state['y_scale']), 1)
+            state['y_max_mm'] = round((state['y_max'] - PULSE_MIN) / max(0.1, state['y_scale']), 1)
 
             read_limit_switches()
             state['timestamp'] = datetime.now().strftime('%H:%M:%S.%f')[:-3]
@@ -557,39 +589,52 @@ def api_status():
 
 @app.route('/api/move', methods=['POST'])
 def api_move():
+    """移動馬達（支援 mm 累加或直接指定目標）"""
     data = request.get_json(silent=True) or {}
-    axis   = data.get('axis', 'x')       # 'x', 'y1', 'y2', 'y'
-    delta  = int(data.get('delta', 0))   # µs 增量
-    target = data.get('target')           # 直接指定 µs
+    axis = data.get('axis', 'x')       # 'x', 'y1', 'y2', 'y'
+    delta_mm = data.get('delta_mm')
+    delta_us = data.get('delta')
+    target_mm = data.get('target_mm')
+    target_us = data.get('target')
 
     if not state['system_run']:
         return jsonify({'ok': False, 'msg': '系統未啟動，請按 START'})
 
+    scale = state['x_scale'] if axis == 'x' else state['y_scale']
+
+    if delta_mm is not None:
+        delta_us = float(delta_mm) * float(scale)
+    if target_mm is not None:
+        target_us = PULSE_MIN + float(target_mm) * float(scale)
+
     try:
         if axis == 'x':
-            new_pulse = state['x_pulse'] + delta if target is None else int(target)
-            diff = new_pulse - state['x_pulse']
-            # 限位保護
-            if state['lim_left'] and diff < 0:
-                return jsonify({'ok': False, 'msg': 'X 軸左側限位'})
-            if state['lim_right'] and diff > 0:
-                return jsonify({'ok': False, 'msg': 'X 軸右側限位'})
-            new_pulse = max(state['x_min'], min(state['x_max'], new_pulse))
-            set_servo_pulse('x', new_pulse)
+            if delta_us is not None:
+                delta_us = float(delta_us)
+                if state['lim_left'] and delta_us < 0:
+                    return jsonify({'ok': False, 'msg': 'X 軸左側限位觸發'})
+                if state['lim_right'] and delta_us > 0:
+                    return jsonify({'ok': False, 'msg': 'X 軸右側限位觸發'})
+                if x_stepper:
+                    x_stepper.add_target_delta(delta_us, state['x_min'], state['x_max'])
+            elif target_us is not None:
+                target_us = float(target_us)
+                if x_stepper:
+                    x_stepper.set_target(target_us, state['x_min'], state['x_max'])
 
         elif axis in ('y', 'y1', 'y2'):
-            new_pulse = state['y1_pulse'] + delta if target is None else int(target)
-            diff = new_pulse - state['y1_pulse']
-            if state['lim_up']   and diff > 0:
-                return jsonify({'ok': False, 'msg': 'Y 軸上側限位'})
-            if state['lim_down'] and diff < 0:
-                return jsonify({'ok': False, 'msg': 'Y 軸下側限位'})
-            new_pulse = max(state['y_min'], min(state['y_max'], new_pulse))
-            set_servo_pulse('y1', new_pulse)
-            if state['y_sync'] or axis == 'y':
-                set_servo_pulse('y2', new_pulse)
-            elif axis == 'y2':
-                set_servo_pulse('y2', new_pulse)
+            if delta_us is not None:
+                delta_us = float(delta_us)
+                if state['lim_down'] and delta_us < 0:
+                    return jsonify({'ok': False, 'msg': 'Y 軸下側限位觸發'})
+                if state['lim_up'] and delta_us > 0:
+                    return jsonify({'ok': False, 'msg': 'Y 軸上側限位觸發'})
+                if y_stepper:
+                    y_stepper.add_target_delta(delta_us, state['y_min'], state['y_max'])
+            elif target_us is not None:
+                target_us = float(target_us)
+                if y_stepper:
+                    y_stepper.set_target(target_us, state['y_min'], state['y_max'])
 
         return jsonify({'ok': True, 'x_pulse': state['x_pulse'],
                         'y1_pulse': state['y1_pulse'], 'y2_pulse': state['y2_pulse']})
@@ -997,13 +1042,36 @@ def api_pickup():
 
 @app.route('/api/set_limits', methods=['POST'])
 def api_set_limits():
-    """設定馬達行程範圍與速度、校準參數"""
+    """設定馬達行程範圍（支援 mm 與 us）、速度與校準參數"""
     data = request.get_json(silent=True) or {}
-    if 'x_min' in data: state['x_min'] = max(PULSE_MIN, int(data['x_min']))
-    if 'x_max' in data: state['x_max'] = min(PULSE_MAX, int(data['x_max']))
-    if 'y_min' in data: state['y_min'] = max(PULSE_MIN, int(data['y_min']))
-    if 'y_max' in data: state['y_max'] = min(PULSE_MAX, int(data['y_max']))
-    if 'y_sync' in data: state['y_sync'] = bool(data['y_sync'])
+    
+    # 支援 mm 設定
+    if 'x_min_mm' in data:
+        mm = float(data['x_min_mm'])
+        state['x_min'] = max(PULSE_MIN, min(PULSE_MAX, int(PULSE_MIN + mm * state['x_scale'])))
+    elif 'x_min' in data:
+        state['x_min'] = max(PULSE_MIN, int(data['x_min']))
+
+    if 'x_max_mm' in data:
+        mm = float(data['x_max_mm'])
+        state['x_max'] = max(state['x_min'] + 10, min(PULSE_MAX, int(PULSE_MIN + mm * state['x_scale'])))
+    elif 'x_max' in data:
+        state['x_max'] = min(PULSE_MAX, int(data['x_max']))
+
+    if 'y_min_mm' in data:
+        mm = float(data['y_min_mm'])
+        state['y_min'] = max(PULSE_MIN, min(PULSE_MAX, int(PULSE_MIN + mm * state['y_scale'])))
+    elif 'y_min' in data:
+        state['y_min'] = max(PULSE_MIN, int(data['y_min']))
+
+    if 'y_max_mm' in data:
+        mm = float(data['y_max_mm'])
+        state['y_max'] = max(state['y_min'] + 10, min(PULSE_MAX, int(PULSE_MIN + mm * state['y_scale'])))
+    elif 'y_max' in data:
+        state['y_max'] = min(PULSE_MAX, int(data['y_max']))
+
+    if 'y_sync' in data:
+        state['y_sync'] = bool(data['y_sync'])
     
     if 'x_max_speed' in data:
         state['x_max_speed'] = float(data['x_max_speed'])
@@ -1018,16 +1086,27 @@ def api_set_limits():
         state['y_accel_steps'] = float(data['y_accel_steps'])
         if y_stepper: y_stepper.accel_steps = float(data['y_accel_steps'])
         
+    if 'homing_speed_hz' in data:
+        state['homing_speed_hz'] = max(100.0, min(1200.0, float(data['homing_speed_hz'])))
+
     if 'x_scale' in data: state['x_scale'] = float(data['x_scale'])
     if 'y_scale' in data: state['y_scale'] = float(data['y_scale'])
     
-    add_history("更新系統與馬達參數設定", "success")
+    x_min_mm = round((state['x_min'] - PULSE_MIN) / state['x_scale'], 1)
+    x_max_mm = round((state['x_max'] - PULSE_MIN) / state['x_scale'], 1)
+    y_min_mm = round((state['y_min'] - PULSE_MIN) / state['y_scale'], 1)
+    y_max_mm = round((state['y_max'] - PULSE_MIN) / state['y_scale'], 1)
+
+    add_history(f"更新系統極限與參數 (X: {x_min_mm}~{x_max_mm}mm, Y: {y_min_mm}~{y_max_mm}mm)", "success")
     return jsonify({'ok': True, 'limits': {
         'x_min': state['x_min'], 'x_max': state['x_max'],
         'y_min': state['y_min'], 'y_max': state['y_max'],
+        'x_min_mm': x_min_mm, 'x_max_mm': x_max_mm,
+        'y_min_mm': y_min_mm, 'y_max_mm': y_max_mm,
         'y_sync': state['y_sync'],
         'x_max_speed': state['x_max_speed'], 'x_accel_steps': state['x_accel_steps'],
         'y_max_speed': state['y_max_speed'], 'y_accel_steps': state['y_accel_steps'],
+        'homing_speed_hz': state['homing_speed_hz'],
         'x_scale': state['x_scale'], 'y_scale': state['y_scale']
     }})
 
@@ -1601,31 +1680,32 @@ def api_terminal_exec():
 
 @socketio.on('cmd_move')
 def on_cmd_move(data):
-    """WebSocket 移動命令（低延遲）
-    [修正4] 新增 y2 分支，避免傳入 y2 時被默默忽略。
-    ⚠️ 注意：目前後端只有一個 y_stepper 實體，y1/y2 同步至相同硬體軸。
-       若未來需要真正獨立驅動 Y1/Y2，需新增第二個 StepperMotor 實體。
-    """
-    axis  = data.get('axis', 'x')
-    delta = int(data.get('delta', 0))
+    """WebSocket 移動命令（低延遲，支援 mm 累加目標 100+100）"""
+    axis = data.get('axis', 'x')
+    delta_mm = data.get('delta_mm')
+    delta_us = data.get('delta')
+
+    scale = state['x_scale'] if axis == 'x' else state['y_scale']
+    if delta_mm is not None:
+        delta = float(delta_mm) * float(scale)
+    else:
+        delta = float(delta_us or 0)
+
     if state['system_run']:
         if axis == 'x':
             if state['lim_left'] and delta < 0:
                 return
             if state['lim_right'] and delta > 0:
                 return
-            new_pulse = max(state['x_min'], min(state['x_max'], state['x_pulse'] + delta))
-            set_servo_pulse('x', new_pulse)
-        elif axis in ('y', 'y1', 'y2'):  # [修正4] 加入 y2 分支
+            if x_stepper:
+                x_stepper.add_target_delta(delta, state['x_min'], state['x_max'])
+        elif axis in ('y', 'y1', 'y2'):
             if state['lim_down'] and delta < 0:
                 return
             if state['lim_up'] and delta > 0:
                 return
-            new_pulse = max(state['y_min'], min(state['y_max'], state['y1_pulse'] + delta))
-            set_servo_pulse('y1', new_pulse)
-            # y_sync 開啟時或明確指定 y/y2 時同步 y2
-            if state['y_sync'] or axis in ('y', 'y2'):
-                set_servo_pulse('y2', new_pulse)
+            if y_stepper:
+                y_stepper.add_target_delta(delta, state['y_min'], state['y_max'])
 
 # ── 主程式 ────────────────────────────────────────────────────────
 if __name__ == '__main__':

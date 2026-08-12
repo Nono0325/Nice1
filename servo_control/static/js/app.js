@@ -9,22 +9,25 @@ const socket = io({ transports: ['websocket', 'polling'] });
 // ── 全域狀態 ──────────────────────────────────────────────────
 let state = {
   x_pulse: 1500, y1_pulse: 1500, y2_pulse: 1500,
+  x_mm: 100.0, y_mm: 100.0,
   x_pct: 50, y_pct: 50,
   vacuum: false, z_down: false,
   system_run: false, arm_down: false,
   pickup_active: false, error: false, error_msg: '',
   lim_left: false, lim_right: false, lim_up: false, lim_down: false,
   x_min: 500, x_max: 2500, y_min: 500, y_max: 2500,
+  x_min_mm: 0.0, x_max_mm: 200.0, y_min_mm: 0.0, y_max_mm: 200.0,
   y_sync: true,
   x_scale: 10.0, y_scale: 10.0,
   x_max_speed: 2000.0, x_accel_steps: 100.0,
   y_max_speed: 2000.0, y_accel_steps: 100.0,
+  homing_speed_hz: 400.0,
   motor_locked: true,
   timestamp: '',
   gpio_mode: '-'
 };
 
-let stepSize  = 50;       // 步進值 µs
+let stepSizeMm = 10;      // 步進移動量 (mm)
 let isTestRunning = false;
 let testInterval = null;
 let settingsDirty = false;  // 設定頁輸入臟標記（防止 WebSocket 覆蓋）
@@ -258,39 +261,50 @@ function updateUI() {
     }
   }
 
-  // X 軸位置條
+  // X 軸位置軌跡與數值
   const xPct = Math.max(0, Math.min(100, s.x_pct || 0));
   setEl('xBar', el => el.style.width = `${xPct}%`);
   setEl('xPctDisplay', el => el.textContent = `${xPct.toFixed(1)}%`);
   setEl('xPulseDisplay', el => el.textContent = `${s.x_pulse} µs`);
-  const xSlider = document.getElementById('xSlider');
-  if (xSlider && document.activeElement !== xSlider) xSlider.value = xPct;
 
-  // 真實物理距離 (mm)
+  // 真實物理座標 (mm)
   const xScale = s.x_scale || 10.0;
   const yScale = s.y_scale || 10.0;
-  const xMm = (s.x_pulse - 500) / xScale;
+  const xMm = s.x_mm !== undefined ? s.x_mm : ((s.x_pulse - 500) / xScale);
   setEl('xMmDisplay', el => el.textContent = `${xMm.toFixed(1)} mm`);
+  setEl('xMmCurVal', el => el.textContent = `${xMm.toFixed(1)} mm`);
 
-  // Y 軸位置條
+  // Y 軸位置軌跡與數值
   const yPct = Math.max(0, Math.min(100, s.y_pct || 0));
   setEl('yBar', el => el.style.width = `${yPct}%`);
   setEl('yPctDisplay', el => el.textContent = `${yPct.toFixed(1)}%`);
   setEl('y1PulseDisplay', el => el.textContent = `${s.y1_pulse} µs`);
   setEl('y2PulseDisplay', el => el.textContent = `${s.y2_pulse} µs`);
-  const yMm = (s.y1_pulse - 500) / yScale;
+  setEl('yPulseVal', el => el.textContent = `${s.y1_pulse} µs`);
+  const yMm = s.y_mm !== undefined ? s.y_mm : ((s.y1_pulse - 500) / yScale);
   setEl('yMmDisplay', el => el.textContent = `${yMm.toFixed(1)} mm`);
-  
-  const ySlider = document.getElementById('ySlider');
-  if (ySlider && document.activeElement !== ySlider) ySlider.value = yPct;
+  setEl('yMmCurVal', el => el.textContent = `${yMm.toFixed(1)} mm`);
 
-  // 進階設定輸入值綁定
-  setElValue('xMaxSpeedInput', s.x_max_speed || 2000);
-  setElValue('xAccelStepsInput', s.x_accel_steps || 100);
-  setElValue('xScaleInput', s.x_scale || 10);
-  setElValue('yMaxSpeedInput', s.y_max_speed || 2000);
-  setElValue('yAccelStepsInput', s.y_accel_steps || 100);
-  setElValue('yScaleInput', s.y_scale || 10);
+  // 進階設定輸入值綁定 (非使用者正在編輯時才同步)
+  if (!settingsDirty) {
+    const curXMinMm = s.x_min_mm !== undefined ? s.x_min_mm : ((s.x_min - 500) / xScale);
+    const curXMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : ((s.x_max - 500) / xScale);
+    const curYMinMm = s.y_min_mm !== undefined ? s.y_min_mm : ((s.y_min - 500) / yScale);
+    const curYMaxMm = s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - 500) / yScale);
+
+    setElValue('xMinInput', curXMinMm.toFixed(1));
+    setElValue('xMaxInput', curXMaxMm.toFixed(1));
+    setElValue('yMinInput', curYMinMm.toFixed(1));
+    setElValue('yMaxInput', curYMaxMm.toFixed(1));
+
+    setElValue('xMaxSpeedInput', s.x_max_speed || 2000);
+    setElValue('xAccelStepsInput', s.x_accel_steps || 100);
+    setElValue('xScaleInput', s.x_scale || 10);
+    setElValue('yMaxSpeedInput', s.y_max_speed || 2000);
+    setElValue('yAccelStepsInput', s.y_accel_steps || 100);
+    setElValue('yScaleInput', s.y_scale || 10);
+    setElValue('homingSpeedInput', s.homing_speed_hz || 400);
+  }
 
   // 馬達鎖定按鈕狀態
   const lockBtn = document.getElementById('btnMotorLock');
@@ -347,13 +361,18 @@ function updateUI() {
     gpioTag.textContent = s.gpio_mode;
   }
 
-  // 範圍設定顯示
-  setElText('curXMin', s.x_min);
-  setElText('curXMax', s.x_max);
-  setElText('curXRange', `${s.x_max - s.x_min} µs`);
-  setElText('curYMin', s.y_min);
-  setElText('curYMax', s.y_max);
-  setElText('curYRange', `${s.y_max - s.y_min} µs`);
+  // 範圍設定顯示 (以 mm 為主)
+  const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : ((s.x_min - 500) / xScale);
+  const xMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : ((s.x_max - 500) / xScale);
+  const yMinMm = s.y_min_mm !== undefined ? s.y_min_mm : ((s.y_min - 500) / yScale);
+  const yMaxMm = s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - 500) / yScale);
+
+  setElText('curXMin', xMinMm.toFixed(1));
+  setElText('curXMax', xMaxMm.toFixed(1));
+  setElText('curXRange', `${(xMaxMm - xMinMm).toFixed(1)} mm`);
+  setElText('curYMin', yMinMm.toFixed(1));
+  setElText('curYMax', yMaxMm.toFixed(1));
+  setElText('curYRange', `${(yMaxMm - yMinMm).toFixed(1)} mm`);
 
   // GPIO 模式橫幅（診斷頁）
   const modeTitle = document.getElementById('diagModeTitle');
@@ -493,36 +512,27 @@ async function cmdPickup() {
   if (r.ok) { toast('自動取件流程啟動', 'success'); addLog('自動取件流程啟動', 'success'); }
 }
 
-// ── 馬達移動 ─────────────────────────────────────────────────
+// ── 馬達移動 (支援 100+100 累加與 mm 單位) ─────────────────────────
 function moveAxis(axis, dir) {
-  if (!state.system_run) { toast('系統未啟動', 'error'); return; }
-  const delta = dir * stepSize;
-  socket.emit('cmd_move', { axis, delta });
+  if (!state.system_run) { toast('系統未啟動，請先按下 START', 'error'); return; }
+  const deltaMm = dir * stepSizeMm;
+  // 發送 mm 增量，後端在 StepperMotor 目標位置上進行累加
+  socket.emit('cmd_move', { axis, delta_mm: deltaMm });
 }
 
-function onXSlider(val) {
-  if (!state.system_run) return;
-  apiPost('/api/set_position', { axis: 'x', pct: parseFloat(val) });
-}
-
-function onYSlider(val) {
-  if (!state.system_run) return;
-  apiPost('/api/set_position', { axis: 'y', pct: parseFloat(val) });
-}
-
-// ── 步進值 ───────────────────────────────────────────────────
-function setStep(size) {
-  stepSize = size;
+// ── 步進移動量 (mm) ───────────────────────────────────────────
+function setStep(sizeMm) {
+  stepSizeMm = sizeMm;
   document.querySelectorAll('#stepChipsX .step-chip').forEach(el => {
-    el.classList.toggle('active', parseInt(el.textContent) === size);
+    el.classList.toggle('active', parseFloat(el.textContent) === sizeMm);
   });
   const ci = document.getElementById('stepCustomInput');
-  if (ci && document.activeElement !== ci) ci.value = size;
+  if (ci && document.activeElement !== ci) ci.value = sizeMm;
 }
 
-function setStepCustom(size) {
-  if (!size || size < 1) return;
-  stepSize = size;
+function setStepCustom(sizeMm) {
+  if (!sizeMm || sizeMm <= 0) return;
+  stepSizeMm = sizeMm;
   document.querySelectorAll('#stepChipsX .step-chip').forEach(el => el.classList.remove('active'));
 }
 
@@ -553,37 +563,45 @@ function setYSync(val) {
   toast(`Y 軸同步: ${val ? 'ON' : 'OFF'}`, 'info');
 }
 
-// ── 範圍設定 ─────────────────────────────────────────────────
+// ── 範圍設定 (單位: mm) ────────────────────────────────────────
 async function applyXLimits() {
-  const xMin = parseInt(document.getElementById('xMinInput').value);
-  const xMax = parseInt(document.getElementById('xMaxInput').value);
-  if (xMin >= xMax) { toast('最小值必須小於最大值', 'error'); return; }
-  const r = await apiPost('/api/set_limits', { x_min: xMin, x_max: xMax });
-  if (r.ok) { toast(`X 軸範圍設定: ${xMin}~${xMax}µs`, 'success'); addLog(`X軸範圍: ${xMin}~${xMax}µs`, 'success'); }
+  const xMinMm = parseFloat(document.getElementById('xMinInput').value);
+  const xMaxMm = parseFloat(document.getElementById('xMaxInput').value);
+  if (isNaN(xMinMm) || isNaN(xMaxMm) || xMinMm >= xMaxMm) {
+    toast('最小值必須小於最大值', 'error');
+    return;
+  }
+  const r = await apiPost('/api/set_limits', { x_min_mm: xMinMm, x_max_mm: xMaxMm });
+  if (r.ok) {
+    toast(`X 軸極限設定: ${xMinMm.toFixed(1)} ~ ${xMaxMm.toFixed(1)} mm`, 'success');
+    addLog(`X軸極限: ${xMinMm.toFixed(1)} ~ ${xMaxMm.toFixed(1)} mm`, 'success');
+  }
 }
 
 async function applyYLimits() {
-  const yMin = parseInt(document.getElementById('yMinInput').value);
-  const yMax = parseInt(document.getElementById('yMaxInput').value);
+  const yMinMm = parseFloat(document.getElementById('yMinInput').value);
+  const yMaxMm = parseFloat(document.getElementById('yMaxInput').value);
   const sync = document.getElementById('ySyncSetting').checked;
-  if (yMin >= yMax) { toast('最小值必須小於最大值', 'error'); return; }
-  const r = await apiPost('/api/set_limits', { y_min: yMin, y_max: yMax, y_sync: sync });
-  if (r.ok) { toast(`Y 軸範圍設定: ${yMin}~${yMax}µs`, 'success'); addLog(`Y軸範圍: ${yMin}~${yMax}µs`, 'success'); }
+  if (isNaN(yMinMm) || isNaN(yMaxMm) || yMinMm >= yMaxMm) {
+    toast('最小值必須小於最大值', 'error');
+    return;
+  }
+  const r = await apiPost('/api/set_limits', { y_min_mm: yMinMm, y_max_mm: yMaxMm, y_sync: sync });
+  if (r.ok) {
+    toast(`Y 軸極限設定: ${yMinMm.toFixed(1)} ~ ${yMaxMm.toFixed(1)} mm`, 'success');
+    addLog(`Y軸極限: ${yMinMm.toFixed(1)} ~ ${yMaxMm.toFixed(1)} mm`, 'success');
+  }
 }
 
 function resetXLimits() {
-  document.getElementById('xMinInput').value = 500;
-  document.getElementById('xMaxInput').value = 2500;
-  document.getElementById('xMinSlider').value = 500;
-  document.getElementById('xMaxSlider').value = 2500;
+  document.getElementById('xMinInput').value = '0.0';
+  document.getElementById('xMaxInput').value = '200.0';
   applyXLimits();
 }
 
 function resetYLimits() {
-  document.getElementById('yMinInput').value = 500;
-  document.getElementById('yMaxInput').value = 2500;
-  document.getElementById('yMinSlider').value = 500;
-  document.getElementById('yMaxSlider').value = 2500;
+  document.getElementById('yMinInput').value = '0.0';
+  document.getElementById('yMaxInput').value = '200.0';
   applyYLimits();
 }
 
@@ -723,12 +741,15 @@ async function applyAdvancedLimits() {
   const yMaxSpeed   = parseFloat(document.getElementById('yMaxSpeedInput').value);
   const yAccelSteps = parseFloat(document.getElementById('yAccelStepsInput').value);
   const yScale      = parseFloat(document.getElementById('yScaleInput').value);
+  const homingSpeed = parseFloat(document.getElementById('homingSpeedInput')?.value || 400);
+
   const r = await apiPost('/api/set_limits', {
     x_max_speed: xMaxSpeed, x_accel_steps: xAccelSteps, x_scale: xScale,
-    y_max_speed: yMaxSpeed, y_accel_steps: yAccelSteps, y_scale: yScale
+    y_max_speed: yMaxSpeed, y_accel_steps: yAccelSteps, y_scale: yScale,
+    homing_speed_hz: homingSpeed
   });
   if (r.ok) {
-    toast('進階加減速與校準參數已套用！', 'success');
+    toast('進階加減速、慢速歸零與校準參數已套用！', 'success');
     clearSettingsDirty();
   }
 }
@@ -736,37 +757,36 @@ async function applyAdvancedLimits() {
 // ── 外觀設定 ────────────────────────────────────────────────────
 function previewFont() {
   const family = document.getElementById('fontFamilySelect')?.value || "'Inter',sans-serif";
-  const size   = document.getElementById('fontSizeSlider')?.value || 14;
+  const size   = document.getElementById('fontSizeInput')?.value || 16;
   const prev   = document.getElementById('fontPreviewText');
   if (prev) { prev.style.fontFamily = family; prev.style.fontSize = size + 'px'; }
 }
 
 function applyAppearance() {
   const family = document.getElementById('fontFamilySelect')?.value || "'Inter',sans-serif";
-  const size   = parseInt(document.getElementById('fontSizeSlider')?.value || 14);
+  const size   = parseInt(document.getElementById('fontSizeInput')?.value || 16);
   document.body.style.fontFamily = family;
   document.body.style.fontSize   = size + 'px';
   localStorage.setItem('uiFontFamily', family);
   localStorage.setItem('uiFontSize',   size);
-  toast('外觀設定已套用！', 'success');
+  toast(`外觀已套用 (字體: ${family.split(',')[0].replace(/'/g,'')}, 大小: ${size}px)`, 'success');
 }
 
 function resetAppearance() {
-  const def = "'Inter',sans-serif", sz = 14;
+  const def = "'Inter', system-ui, sans-serif", sz = 16;
   const sel = document.getElementById('fontFamilySelect');
-  const sld = document.getElementById('fontSizeSlider');
+  const inp = document.getElementById('fontSizeInput');
   const lbl = document.getElementById('fontSizeLabel');
   if (sel) sel.value = def;
-  if (sld) sld.value = sz;
+  if (inp) inp.value = sz;
   if (lbl) lbl.textContent = sz;
   document.body.style.fontFamily = def;
   document.body.style.fontSize   = sz + 'px';
   localStorage.removeItem('uiFontFamily');
   localStorage.removeItem('uiFontSize');
   previewFont();
-  toast('外觀已重置為預設', 'info');
+  toast('外觀設定已重置為預設', 'info');
 }
-
 function loadAppearanceFromStorage() {
   const family = localStorage.getItem('uiFontFamily');
   const size   = localStorage.getItem('uiFontSize');
@@ -777,9 +797,9 @@ function loadAppearanceFromStorage() {
   }
   if (size) {
     document.body.style.fontSize = size + 'px';
-    const sld = document.getElementById('fontSizeSlider');
+    const inp = document.getElementById('fontSizeInput');
     const lbl = document.getElementById('fontSizeLabel');
-    if (sld) sld.value = size;
+    if (inp) inp.value = size;
     if (lbl) lbl.textContent = size;
   }
   previewFont();

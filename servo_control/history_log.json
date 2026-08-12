@@ -3,5 +3,20 @@
     "time": "2026-08-12 00:00:00",
     "msg": "系統就緒 (Raspberry Pi Stepper Motor Controller v1.0.5)",
     "type": "success"
+  },
+  {
+    "time": "2026-08-12 21:34:28",
+    "msg": "更新系統極限與參數 (X: 10.0~180.0mm, Y: 20.0~170.0mm)",
+    "type": "success"
+  },
+  {
+    "time": "2026-08-12 21:34:29",
+    "msg": "X 軸緩慢歸零完成 (已回原點 0.0 mm)",
+    "type": "success"
+  },
+  {
+    "time": "2026-08-12 21:34:29",
+    "msg": "更新系統極限與參數 (X: 0.0~200.0mm, Y: 0.0~200.0mm)",
+    "type": "success"
   }
 ]

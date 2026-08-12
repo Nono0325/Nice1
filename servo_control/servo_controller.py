@@ -1304,15 +1304,41 @@ def api_settings_security():
     return jsonify({'ok': True, 'lock_timeout_min': state['lock_timeout_min'],
                     'is_raspberry_pi': IS_RASPBERRY_PI})
 
+# 終端機活躍進程管理
+active_terminal_proc = None
+active_terminal_lock = threading.Lock()
+
+def get_git_repo_dir():
+    """智慧尋找專案所屬的 Git 倉庫根目錄（支援子目錄部署與標準倉庫結構）"""
+    current = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(4):
+        if os.path.isdir(os.path.join(current, '.git')):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return parent if os.path.exists(parent) else os.path.dirname(os.path.abspath(__file__))
+
 @app.route('/api/terminal/kill', methods=['POST'])
 def api_terminal_kill():
-    """中止目前執行中的終端機指令"""
+    """中止目前執行中的終端機指令進程"""
+    global active_terminal_proc
     data = request.get_json(silent=True) or {}
     token = data.get('token', '')
     if not is_valid_token(token):
         return jsonify({'ok': False, 'msg': '未授權'})
-    add_history("使用者中止終端機指令", "warn")
-    return jsonify({'ok': True, 'msg': '已發送中止訊號'})
+
+    with active_terminal_lock:
+        if active_terminal_proc and active_terminal_proc.poll() is None:
+            try:
+                active_terminal_proc.kill()
+                add_history("使用者終止終端機執行中指令", "warn")
+                return jsonify({'ok': True, 'msg': '已成功終止指令進程'})
+            except Exception as e:
+                return jsonify({'ok': False, 'msg': f'終止失敗: {e}'})
+    return jsonify({'ok': True, 'msg': '目前無執行中的指令進程'})
 
 # ── 系統更新 API ──────────────────────────────────────────────────
 GITHUB_REPO = "Nono0325/Nice"  # GitHub 倉庫名稱
@@ -1335,15 +1361,16 @@ def api_update_check():
         
         # 取得本地 commit SHA
         try:
+            repo_dir = get_git_repo_dir()
             local_sha = subprocess.run(
                 ['git', 'rev-parse', '--short', 'HEAD'],
                 capture_output=True, text=True,
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                cwd=repo_dir
             ).stdout.strip()
         except Exception:
             local_sha = 'unknown'
         
-        up_to_date = local_sha != '' and remote_sha.startswith(local_sha[:7]) or local_sha == remote_sha
+        up_to_date = local_sha != '' and (remote_sha.startswith(local_sha[:7]) or local_sha == remote_sha)
         
         return jsonify({
             'ok': True,
@@ -1369,7 +1396,7 @@ def api_update_pull():
     if not is_valid_site_token(token):
         return jsonify({'ok': False, 'msg': '未授權，請先登入'})
 
-    repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo_dir = get_git_repo_dir()
     add_history("系統更新：開始執行 git pull", "warn")
 
     try:
@@ -1466,6 +1493,7 @@ _terminal_cwd = {}
 @app.route('/api/terminal/exec', methods=['POST'])
 def api_terminal_exec():
     """Web 系統終端機指令執行（受驗證保護，支援 sudo / cd / 可配置超時）"""
+    global active_terminal_proc
     data = request.get_json(silent=True) or {}
     token   = data.get('token', '')
     cmd     = data.get('cmd', '').strip()
@@ -1516,11 +1544,16 @@ def api_terminal_exec():
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, cwd=cwd
             )
+            with active_terminal_lock:
+                active_terminal_proc = proc
             try:
                 stdout, stderr = proc.communicate(input=user_pwd + '\n', timeout=timeout_sec)
             except subprocess.TimeoutExpired:
                 proc.kill(); proc.communicate()
                 return jsonify({'ok': False, 'output': f'❌ 指令執行超時（超過 {timeout_sec} 秒）\n提示：長時間指令請改用 SSH 執行'})
+            finally:
+                with active_terminal_lock:
+                    active_terminal_proc = None
 
             # 過濾 sudo 的密碼提示行
             stderr_clean = '\n'.join(
@@ -1538,22 +1571,31 @@ def api_terminal_exec():
         else:
             env = os.environ.copy()
             env['TERM'] = 'xterm-256color'
-            res = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True,
-                timeout=timeout_sec, cwd=cwd, env=env
+            proc = subprocess.Popen(
+                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, cwd=cwd, env=env
             )
-            stdout = res.stdout or ''
-            stderr = res.stderr or ''
+            with active_terminal_lock:
+                active_terminal_proc = proc
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout_sec)
+            except subprocess.TimeoutExpired:
+                proc.kill(); proc.communicate()
+                return jsonify({'ok': False, 'output': f'❌ 指令執行超時（超過 {timeout_sec} 秒）'})
+            finally:
+                with active_terminal_lock:
+                    active_terminal_proc = None
+
+            stdout = stdout or ''
+            stderr = stderr or ''
             output = stdout
             if stderr.strip():
                 output += f'\n[STDERR]\n{stderr}'
             if not output.strip():
                 output = '(指令執行完成，無輸出內容)'
-            return jsonify({'ok': res.returncode == 0, 'returncode': res.returncode,
+            return jsonify({'ok': proc.returncode == 0, 'returncode': proc.returncode,
                             'output': output, 'cwd': cwd})
 
-    except subprocess.TimeoutExpired:
-        return jsonify({'ok': False, 'output': f'❌ 指令執行超時（超過 {timeout_sec} 秒）'})
     except Exception as e:
         return jsonify({'ok': False, 'output': f'❌ 執行例外: {str(e)}'}) 
 

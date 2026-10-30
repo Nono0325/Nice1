@@ -1261,6 +1261,10 @@ function drawGcodePath() {
 
 async function runGcode() {
   if (gcodeLines.length === 0 || gcodeRunning) return;
+  if (!state.system_run) {
+    toast('請先按下 START 啟動系統！', 'error');
+    return;
+  }
   
   gcodeRunning = true;
   document.getElementById('btnRunGcode').disabled = true;
@@ -1305,10 +1309,16 @@ async function runGcode() {
         await apiPost('/api/set_position', { axis: 'x', pct: (pulseX - state.x_min) / (state.x_max - state.x_min) * 100 });
         await apiPost('/api/set_position', { axis: 'y', pct: (pulseY - state.y_min) / (state.y_max - state.y_min) * 100 });
         
-        while (gcodeRunning) {
+        let waitLoops = 0;
+        while (gcodeRunning && state.system_run) {
           const diffX = Math.abs(state.x_pulse - pulseX);
           const diffY = Math.abs(state.y1_pulse - pulseY);
           if (diffX < 10 && diffY < 10) {
+            break;
+          }
+          waitLoops++;
+          if (waitLoops > 150) { // 15 秒超時保護
+            addLog("G-code 警告: 移動到位等待超時", "warn");
             break;
           }
           await sleep(100);
@@ -1319,10 +1329,12 @@ async function runGcode() {
       }
     } else if (cmd === 'G28') {
       await apiPost('/api/home', { axis: 'all' });
-      // 輪詢等待歸零完成，最多等 15 秒
-      for (let i = 0; i < 150 && gcodeRunning; i++) {
-        await sleep(100);
+      // 先等待 200ms 確保後端 state.is_homing 已同步
+      await sleep(200);
+      // 輪詢等待歸零完成，最多等 30 秒
+      for (let i = 0; i < 300 && gcodeRunning; i++) {
         if (!state.is_homing) break;
+        await sleep(100);
       }
       lastX = 0;
       lastY = 0;
@@ -1712,6 +1724,23 @@ document.addEventListener('DOMContentLoaded', () => {
   addLog('系統介面載入完成', 'success');
   addLog('使用 ← → ↑ ↓ 方向鍵快速控制馬達', 'info');
   addLog('V=吸盤切換 | Z=手臂切換 | H=全部歸零', 'info');
+
+  // 位置軌跡點擊直接設定目標座標
+  const setupTrackClick = (trackId, axis) => {
+    const track = document.getElementById(trackId);
+    if (!track) return;
+    track.addEventListener('click', (e) => {
+      if (!state.system_run) {
+        toast('系統未啟動，請先按下 START', 'error');
+        return;
+      }
+      const rect = track.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+      apiPost('/api/set_position', { axis, pct });
+    });
+  };
+  setupTrackClick('xTrack', 'x');
+  setupTrackClick('yTrack', 'y');
 
   // 全站認證檢查（最後執行，可能會顯示登入遮罩）
   checkSiteAuthOnLoad();

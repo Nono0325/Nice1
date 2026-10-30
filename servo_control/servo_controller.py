@@ -139,6 +139,7 @@ state = {
 }
 
 homing_lock = threading.Lock()
+homing_abort_event = threading.Event()
 
 
 # 歷史波形資料（供網頁繪圖）
@@ -235,27 +236,32 @@ class StepperMotor:
                 
                 self.current_speed_hz = max(self.min_speed_hz, min(self.max_speed_hz, speed))
                 
-                # 限位開關安全防護
+                # 限位開關安全防護（立即強制煞車，避免持續衝撞）
                 if diff < 0 and self.name == 'x' and state['lim_left']:
+                    self.halt()
                     time.sleep(0.01)
                     continue
                 if diff > 0 and self.name == 'x' and state['lim_right']:
+                    self.halt()
                     time.sleep(0.01)
                     continue
                 if diff < 0 and self.name == 'y' and state['lim_down']:
+                    self.halt()
                     time.sleep(0.01)
                     continue
                 if diff > 0 and self.name == 'y' and state['lim_up']:
+                    self.halt()
                     time.sleep(0.01)
                     continue
 
                 if not IS_RASPBERRY_PI:
-                    # 模擬模式：平滑移動
-                    time.sleep(1.0 / self.current_speed_hz)
+                    # 模擬模式：以 50Hz 平滑步進精確模擬運動，杜絕 Windows timer 睡眠延遲與高 CPU 占用
+                    time.sleep(0.02)
+                    step_chunk = min(abs(diff), (self.current_speed_hz / self.steps_per_unit) * 0.02)
                     if diff > 0:
-                        self.current_pos += step_val
+                        self.current_pos += step_chunk
                     else:
-                        self.current_pos -= step_val
+                        self.current_pos -= step_chunk
                     continue
 
                 # 實際樹梅派模式
@@ -378,133 +384,290 @@ def read_limit_switches():
         state['lim_up']    = not GPIO.input(PIN['LIM_UP'])
         state['lim_down']  = not GPIO.input(PIN['LIM_DOWN'])
     else:
-        # 模擬模式：根據位置自動模擬限位
+        # 模擬模式：超出行程邊界才觸發（避免回原點後限位燈常亮紅燈）
         if x_stepper:
-            state['lim_left']  = x_stepper.current_pos <= state['x_min'] + 10
-            state['lim_right'] = x_stepper.current_pos >= state['x_max'] - 10
+            state['lim_left']  = x_stepper.current_pos < state['x_min']
+            state['lim_right'] = x_stepper.current_pos > state['x_max']
         if y_stepper:
-            state['lim_down']  = y_stepper.current_pos <= state['y_min'] + 10
-            state['lim_up']    = y_stepper.current_pos >= state['y_max'] - 10
+            state['lim_down']  = y_stepper.current_pos < state['y_min']
+            state['lim_up']    = y_stepper.current_pos > state['y_max']
 
-def _home_single_axis(axis_name):
-    """單軸平穩精準歸零（參考步進馬達設定緩慢歸零，避免撞擊）"""
-    global x_stepper, y_stepper
-    stepper = x_stepper if axis_name == 'x' else y_stepper
-    if not stepper:
-        return
-
-    lim_pin = PIN['LIM_LEFT'] if axis_name == 'x' else PIN['LIM_DOWN']
-    state_lim_key = 'lim_left' if axis_name == 'x' else 'lim_down'
-    min_pos = state['x_min'] if axis_name == 'x' else state['y_min']
+def _execute_hardware_homing(target_axes):
+    """樹梅派真實 GPIO 兩階段高精準歸零核心"""
+    global x_stepper, y_stepper, homing_abort_event
     
-    # 參考步進馬達設定之緩慢歸零頻率 (預設 350~450 Hz)
+    axis_configs = []
+    for ax in target_axes:
+        st = x_stepper if ax == 'x' else y_stepper
+        lim_pin = PIN['LIM_LEFT'] if ax == 'x' else PIN['LIM_DOWN']
+        state_key = 'lim_left' if ax == 'x' else 'lim_down'
+        min_pos = state['x_min'] if ax == 'x' else state['y_min']
+        step_val = 1.0 / st.steps_per_unit
+        
+        # 確保致能低電位
+        GPIO.output(st.ena_pin, GPIO.LOW)
+        
+        axis_configs.append({
+            'name': ax,
+            'stepper': st,
+            'pul_pin': st.pul_pin,
+            'dir_pin': st.dir_pin,
+            'lim_pin': lim_pin,
+            'state_key': state_key,
+            'min_pos': min_pos,
+            'step_val': step_val,
+            'triggered': False,
+            'timed_out': False
+        })
+
+    # ── 階段 A: 預先檢查 - 若原先已壓在限位開關上，先慢速退開 ────
+    for cfg in axis_configs:
+        if not GPIO.input(cfg['lim_pin']):  # PUD_UP: 低電位 = 觸發
+            add_history(f"{cfg['name'].upper()} 軸限位開關處於壓下狀態，執行預先退開...", "info")
+            GPIO.output(cfg['dir_pin'], GPIO.HIGH)  # 正方向 (退開)
+            pre_step_interval = 1.0 / 250.0
+            pre_steps = 0
+            while not GPIO.input(cfg['lim_pin']) and pre_steps < 3000:
+                if homing_abort_event.is_set():
+                    add_history("歸零程序被中止（緊急停止）", "warn")
+                    return
+                t_p_start = time.perf_counter()
+                GPIO.output(cfg['pul_pin'], GPIO.HIGH)
+                t_pulse = time.perf_counter() + 0.000004
+                while time.perf_counter() < t_pulse:
+                    pass
+                GPIO.output(cfg['pul_pin'], GPIO.LOW)
+                pre_steps += 1
+                t_rem = (t_p_start + pre_step_interval) - time.perf_counter()
+                if t_rem > 0.0002:
+                    time.sleep(t_rem - 0.0002)
+                while time.perf_counter() < (t_p_start + pre_step_interval):
+                    pass
+            
+            # 再多退 50 步作安全淨空
+            for _ in range(50):
+                if homing_abort_event.is_set():
+                    return
+                t_p_start = time.perf_counter()
+                GPIO.output(cfg['pul_pin'], GPIO.HIGH)
+                t_pulse = time.perf_counter() + 0.000004
+                while time.perf_counter() < t_pulse:
+                    pass
+                GPIO.output(cfg['pul_pin'], GPIO.LOW)
+                t_rem = (t_p_start + pre_step_interval) - time.perf_counter()
+                if t_rem > 0.0002:
+                    time.sleep(t_rem - 0.0002)
+                while time.perf_counter() < (t_p_start + pre_step_interval):
+                    pass
+
+    # ── 階段 B: 平穩逼近 (Toward Origin / Seek) ───────────────────
     homing_hz = max(150.0, min(800.0, float(state.get('homing_speed_hz', 400.0))))
     step_interval = 1.0 / homing_hz
+    max_steps = 20000  # 涵蓋全行程的安全脈衝上限
+
+    for cfg in axis_configs:
+        GPIO.output(cfg['dir_pin'], GPIO.LOW)  # 負方向 (朝原點)
+        cfg['triggered'] = False
+
+    steps = 0
+    while steps < max_steps:
+        if homing_abort_event.is_set():
+            add_history("歸零程序被中止（緊急停止）", "warn")
+            return
+
+        t_step_start = time.perf_counter()
+        active_pulse = []
+
+        for cfg in axis_configs:
+            if not cfg['triggered']:
+                if not GPIO.input(cfg['lim_pin']):  # 觸發現位
+                    cfg['triggered'] = True
+                    state[cfg['state_key']] = True
+                    add_history(f"{cfg['name'].upper()} 軸平穩觸發現位開關", "info")
+                else:
+                    GPIO.output(cfg['pul_pin'], GPIO.HIGH)
+                    active_pulse.append(cfg)
+
+        if not active_pulse:
+            # 所有軸皆已觸發現位開關
+            break
+
+        # 4 µs 脈衝寬度
+        t_pulse = time.perf_counter() + 0.000004
+        while time.perf_counter() < t_pulse:
+            pass
+
+        for cfg in active_pulse:
+            GPIO.output(cfg['pul_pin'], GPIO.LOW)
+            cfg['stepper'].current_pos = max(cfg['min_pos'], cfg['stepper'].current_pos - cfg['step_val'])
+
+        steps += 1
+
+        t_rem = (t_step_start + step_interval) - time.perf_counter()
+        if t_rem > 0.0002:
+            time.sleep(t_rem - 0.0002)
+        while time.perf_counter() < (t_step_start + step_interval):
+            pass
+
+    for cfg in axis_configs:
+        if not cfg['triggered']:
+            cfg['timed_out'] = True
+            add_history(f"{cfg['name'].upper()} 軸歸零警告: 超時未觸發現位開關", "warn")
+
+    # ── 階段 C: 精準退開至開關剛釋放 (Pull-off / Latch) ─────────────
+    backoff_hz = 250.0
+    backoff_interval = 1.0 / backoff_hz
+    for cfg in axis_configs:
+        if cfg['timed_out'] or homing_abort_event.is_set():
+            continue
+
+        GPIO.output(cfg['dir_pin'], GPIO.HIGH)  # 正方向 (遠離限位)
+        
+        # 1. 步進直到限位開關釋放 (變為 HIGH)
+        bo_steps = 0
+        while not GPIO.input(cfg['lim_pin']) and bo_steps < 2000:
+            if homing_abort_event.is_set():
+                return
+            t_b_start = time.perf_counter()
+            GPIO.output(cfg['pul_pin'], GPIO.HIGH)
+            t_pulse = time.perf_counter() + 0.000004
+            while time.perf_counter() < t_pulse:
+                pass
+            GPIO.output(cfg['pul_pin'], GPIO.LOW)
+            bo_steps += 1
+            t_rem = (t_b_start + backoff_interval) - time.perf_counter()
+            if t_rem > 0.0002:
+                time.sleep(t_rem - 0.0002)
+            while time.perf_counter() < (t_b_start + backoff_interval):
+                pass
+
+        # 2. 開關釋放後，多走微小安全淨空 (25 步 = 0.5 mm) 確保完全不受干擾
+        for _ in range(25):
+            if homing_abort_event.is_set():
+                return
+            t_b_start = time.perf_counter()
+            GPIO.output(cfg['pul_pin'], GPIO.HIGH)
+            t_pulse = time.perf_counter() + 0.000004
+            while time.perf_counter() < t_pulse:
+                pass
+            GPIO.output(cfg['pul_pin'], GPIO.LOW)
+            t_rem = (t_b_start + backoff_interval) - time.perf_counter()
+            if t_rem > 0.0002:
+                time.sleep(t_rem - 0.0002)
+            while time.perf_counter() < (t_b_start + backoff_interval):
+                pass
+
+        # 3. 標記原點座標
+        cfg['stepper'].set_position(cfg['min_pos'])
+        cfg['stepper'].set_target(cfg['min_pos'])
+        state[cfg['state_key']] = False
+        add_history(f"{cfg['name'].upper()} 軸平穩歸零完成 (已精準校準原點 0.0 mm)", "success")
+
+def _execute_simulation_homing(target_axes):
+    """模擬環境平滑歸零核心"""
+    global x_stepper, y_stepper, homing_abort_event
     
-    if IS_RASPBERRY_PI:
-        stepper.pause_for_homing = True
-        time.sleep(0.02)  # 等待背景迴圈進入暫停狀態
-        try:
-            # 致能並設定負方向 (朝原點前進)
-            GPIO.output(stepper.ena_pin, GPIO.LOW)
-            GPIO.output(stepper.dir_pin, GPIO.LOW)
-            
-            steps = 0
-            max_steps = 15000  # 安全最大脈衝數
-            step_val = 1.0 / stepper.steps_per_unit
-            
-            while steps < max_steps:
-                if not GPIO.input(lim_pin):  # 低電位觸發 (PUD_UP)
-                    state[state_lim_key] = True
-                    break
-                
-                t_step_start = time.perf_counter()
-                
-                # 發送步進脈衝 (HIGH -> 4us -> LOW)
-                GPIO.output(stepper.pul_pin, GPIO.HIGH)
-                t_pulse = time.perf_counter() + 0.000004
-                while time.perf_counter() < t_pulse:
-                    pass
-                GPIO.output(stepper.pul_pin, GPIO.LOW)
-                
-                steps += 1
-                stepper.current_pos = max(min_pos, stepper.current_pos - step_val)
-                
-                t_rem = (t_step_start + step_interval) - time.perf_counter()
-                if t_rem > 0.0002:
-                    time.sleep(t_rem - 0.0002)
-                while time.perf_counter() < (t_step_start + step_interval):
-                    pass
-            
-            if steps >= max_steps:
-                add_history(f"{axis_name.upper()} 軸歸零警告: 超時未觸發現位開關", "warn")
-                print(f"[HOME] Warning: {axis_name.upper()} axis homing step limit reached")
-            else:
-                add_history(f"{axis_name.upper()} 軸平穩觸發現位開關", "info")
+    start_positions = {}
+    min_positions = {}
+    for ax in target_axes:
+        st = x_stepper if ax == 'x' else y_stepper
+        start_positions[ax] = float(st.current_pos)
+        min_positions[ax] = float(state['x_min'] if ax == 'x' else state['y_min'])
 
-            # 緩慢平穩退開限位開關 (Back-off 250 步 @ 300 Hz)
-            GPIO.output(stepper.dir_pin, GPIO.HIGH)  # 正方向向右/向上
-            backoff_interval = 1.0 / 300.0
-            for _ in range(250):
-                t_b_start = time.perf_counter()
-                GPIO.output(stepper.pul_pin, GPIO.HIGH)
-                t_pulse = time.perf_counter() + 0.000004
-                while time.perf_counter() < t_pulse:
-                    pass
-                GPIO.output(stepper.pul_pin, GPIO.LOW)
-                
-                t_rem = (t_b_start + backoff_interval) - time.perf_counter()
-                if t_rem > 0.0002:
-                    time.sleep(t_rem - 0.0002)
-                while time.perf_counter() < (t_b_start + backoff_interval):
-                    pass
-                    
-            stepper.set_position(min_pos)
-        finally:
-            stepper.pause_for_homing = False
-    else:
-        # 模擬模式：平滑逐步回原點（展示慢速歸零效果）
-        stepper.pause_for_homing = True
-        try:
-            start_pos = stepper.current_pos
-            steps_cnt = 25
-            for i in range(steps_cnt):
-                stepper.current_pos = start_pos - (start_pos - min_pos) * ((i + 1) / steps_cnt)
-                time.sleep(0.04)
-            stepper.set_position(min_pos)
-        finally:
-            stepper.pause_for_homing = False
+    steps_cnt = 30
+    for i in range(steps_cnt):
+        if homing_abort_event.is_set():
+            add_history("歸零程序被中止（緊急停止）", "warn")
+            return
+        
+        ratio = (i + 1) / steps_cnt
+        for ax in target_axes:
+            st = x_stepper if ax == 'x' else y_stepper
+            st.current_pos = start_positions[ax] - (start_positions[ax] - min_positions[ax]) * ratio
+        time.sleep(0.035)
 
-    stepper.set_target(min_pos)
-    add_history(f"{axis_name.upper()} 軸緩慢歸零完成 (已回原點 0.0 mm)", "success")
+    # 模擬觸發現位瞬間反饋
+    for ax in target_axes:
+        key = 'lim_left' if ax == 'x' else 'lim_down'
+        state[key] = True
+    time.sleep(0.1)
 
+    # 模擬退開後定點於 0.0 mm
+    for ax in target_axes:
+        st = x_stepper if ax == 'x' else y_stepper
+        st.set_position(min_positions[ax])
+        st.set_target(min_positions[ax])
+        key = 'lim_left' if ax == 'x' else 'lim_down'
+        state[key] = False
+        add_history(f"{ax.upper()} 軸平穩歸零完成 (已回原點 0.0 mm)", "success")
+
+def _home_single_axis(axis_name):
+    """單軸歸零相容介面"""
+    return home_axis(axis_name)
 
 def home_axis(axis='all'):
-    """馬達歸零（回原點）
-    [修復重點]
-    1. 支援雙軸並行 (Parallel) 歸零，總耗時縮短為原本的半數以下 (< 2 秒)。
-    2. 使用高精度脈衝定時與實時位置更新，大幅消除卡頓與介面凍結。
-    3. 加入 homing_lock 重複觸發保護。
+    """馬達智慧平穩精準歸零
+    [升級特點]
+    1. Z 軸（手臂）安全防護：歸零前自動檢測並抬升手臂，防止碰撞夾具或工件。
+    2. 雙軸同步並行演算法：單一排程迴圈同時發送 X / Y 脈衝，杜絕 Python GIL 執行緒競爭與脈衝抖動。
+    3. 限位預先退開 (Pre-Backoff)：若初始已壓在限位開關上，自動先慢速退開再做基準搜尋。
+    4. 兩階段精確歸零：平穩逼近觸發 -> 慢速反向退開至開關剛釋放 (Pull-off) -> 校準 0.0 mm 原點。
+    5. 緊急停止 (E-STOP) 立即中斷：檢查 homing_abort_event，按 STOP 瞬間煞車退出。
+    6. 即時限位開關狀態同步，避免歸零後限位燈卡死紅燈。
     """
-    global homing_lock
+    global homing_lock, homing_abort_event, x_stepper, y_stepper
+    
     if not homing_lock.acquire(blocking=False):
         add_history("已有歸零程序執行中，無視重複請求", "warn")
-        return
-        
+        return False
+
+    homing_abort_event.clear()
     state['is_homing'] = True
+    
+    target_axes = []
+    if axis in ('all', 'xy'):
+        if x_stepper: target_axes.append('x')
+        if y_stepper: target_axes.append('y')
+    elif axis == 'x' and x_stepper:
+        target_axes.append('x')
+    elif axis in ('y', 'y1', 'y2') and y_stepper:
+        target_axes.append('y')
+
+    if not target_axes:
+        state['is_homing'] = False
+        homing_lock.release()
+        return True
+
     try:
-        if axis == 'all':
-            print("[HOME] Starting parallel all-axis homing...")
-            tx = threading.Thread(target=_home_single_axis, args=('x',), daemon=True)
-            ty = threading.Thread(target=_home_single_axis, args=('y',), daemon=True)
-            tx.start()
-            ty.start()
-            tx.join()
-            ty.join()
-        elif axis in ('x', 'y'):
-            print(f"[HOME] Starting {axis.upper()} axis homing...")
-            _home_single_axis(axis)
+        # 1. 手臂安全檢測與抬升
+        if state.get('z_down') or state.get('arm_down'):
+            add_history("歸零安全防護：自動抬升手臂以防碰撞...", "info")
+            set_digital_output('z_down', False)
+            for _ in range(8):
+                if homing_abort_event.is_set():
+                    add_history("歸零程序被中止（緊急停止）", "warn")
+                    return False
+                time.sleep(0.05)
+
+        # 暫停被歸零軸的背景執行緒
+        for ax in target_axes:
+            st = x_stepper if ax == 'x' else y_stepper
+            st.pause_for_homing = True
+        time.sleep(0.02)
+
+        # 2. 執行硬體或模擬歸零
+        if IS_RASPBERRY_PI:
+            _execute_hardware_homing(target_axes)
+        else:
+            _execute_simulation_homing(target_axes)
+
+        read_limit_switches()
+        return True
+
     finally:
+        for ax in target_axes:
+            st = x_stepper if ax == 'x' else y_stepper
+            st.pause_for_homing = False
         state['is_homing'] = False
         homing_lock.release()
 
@@ -649,7 +812,7 @@ def api_set_position():
 
     data = request.get_json(silent=True) or {}
     axis = data.get('axis', 'x')
-    pct  = float(data.get('pct', 50))
+    pct  = max(0.0, min(100.0, float(data.get('pct', 50))))
 
     if axis == 'x':
         pulse = state['x_min'] + (state['x_max'] - state['x_min']) * pct / 100
@@ -797,14 +960,24 @@ def run_macro_loop(commands):
                     set_servo_pulse(axis, target)
                     add_history(f"巨集指令: 移動 {axis.upper()} 至 {target} µs", "info")
                     
+                    st = x_stepper if axis == 'x' else y_stepper
+                    min_l = state['x_min'] if axis == 'x' else state['y_min']
+                    max_l = state['x_max'] if axis == 'x' else state['y_max']
+                    clamped_target = max(min_l, min(max_l, target))
+                    
+                    t_move_start = time.time()
                     while macro_running and not macro_paused:
-                        if axis == 'x' and x_stepper:
-                            if abs(x_stepper.current_pos - target) < 5:
-                                break
-                        elif axis in ('y', 'y1', 'y2') and y_stepper:
-                            if abs(y_stepper.current_pos - target) < 5:
-                                break
-                        else:
+                        if st is None:
+                            break
+                        if abs(st.current_pos - clamped_target) < 10:
+                            break
+                        # 限位觸發時及時跳出，防止死等卡死
+                        if axis == 'x' and ((clamped_target < st.current_pos and state['lim_left']) or (clamped_target > st.current_pos and state['lim_right'])):
+                            break
+                        if axis in ('y', 'y1', 'y2') and ((clamped_target < st.current_pos and state['lim_down']) or (clamped_target > st.current_pos and state['lim_up'])):
+                            break
+                        if time.time() - t_move_start > 15.0:
+                            add_history(f"巨集警告: 移動至 {target}µs 到位超時", "warn")
                             break
                         time.sleep(0.05)
                 except ValueError:
@@ -882,6 +1055,7 @@ def api_stop():
     state['system_run'] = False
     state['pickup_active'] = False
     macro_running = False
+    homing_abort_event.set()
     # [修正2] E-STOP：立即將步進馬達目標位置設為當前位置，強制煞車並解除歸零暫停
     if x_stepper:
         x_stepper.pause_for_homing = False
@@ -901,6 +1075,7 @@ def api_home():
     data = request.get_json(silent=True) or {}
     axis = data.get('axis', 'all')
     add_history(f"手動點擊馬達歸零 ({axis.upper()})", "info")
+    state['is_homing'] = True
     t = threading.Thread(target=home_axis, args=(axis,), daemon=True)
     t.start()
     return jsonify({'ok': True, 'msg': f'歸零中: {axis}'})
@@ -927,6 +1102,8 @@ def api_pickup():
     """自動取件流程"""
     if not state['system_run']:
         return jsonify({'ok': False, 'msg': '系統未啟動'})
+    if state.get('pickup_active', False):
+        return jsonify({'ok': False, 'msg': '自動取件流程已在執行中'})
 
     def _wait_motor_reach(motor, target, tolerance=10, timeout=10.0):
         """[修正3] 等待步進馬達抵達目標位置，並支援 system_run / timeout 中斷"""
@@ -1033,6 +1210,7 @@ def api_pickup():
             state['error_msg'] = str(e)
             add_history(f"自動取件異常: {e}", "error")
         finally:
+            set_digital_output('z_down', False)  # 安全防護：異常或結束時確保手臂抬升
             state['pickup_active'] = False
             socketio.emit('pickup_step', {'step': 'idle'})
 
@@ -1045,6 +1223,10 @@ def api_set_limits():
     """設定馬達行程範圍（支援 mm 與 us）、速度與校準參數"""
     data = request.get_json(silent=True) or {}
     
+    # 優先更新比例參數（避免換算 mm 極限時使用舊 scale 或被 0 除）
+    if 'x_scale' in data: state['x_scale'] = max(0.1, float(data['x_scale']))
+    if 'y_scale' in data: state['y_scale'] = max(0.1, float(data['y_scale']))
+
     # 支援 mm 設定
     if 'x_min_mm' in data:
         mm = float(data['x_min_mm'])
@@ -1088,9 +1270,6 @@ def api_set_limits():
         
     if 'homing_speed_hz' in data:
         state['homing_speed_hz'] = max(100.0, min(1200.0, float(data['homing_speed_hz'])))
-
-    if 'x_scale' in data: state['x_scale'] = float(data['x_scale'])
-    if 'y_scale' in data: state['y_scale'] = float(data['y_scale'])
     
     x_min_mm = round((state['x_min'] - PULSE_MIN) / state['x_scale'], 1)
     x_max_mm = round((state['x_max'] - PULSE_MIN) / state['x_scale'], 1)
@@ -1420,7 +1599,7 @@ def api_terminal_kill():
     return jsonify({'ok': True, 'msg': '目前無執行中的指令進程'})
 
 # ── 系統更新 API ──────────────────────────────────────────────────
-GITHUB_REPO = "Nono0325/Nice"  # GitHub 倉庫名稱
+GITHUB_REPO = "Nono0325/Nice1"  # GitHub 倉庫名稱
 GITHUB_BRANCH = "main"         # 預設分支
 
 @app.route('/api/update/check', methods=['GET', 'POST'])

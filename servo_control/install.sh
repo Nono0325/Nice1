@@ -22,13 +22,13 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 log_step()  { echo -e "\n${BOLD}${GREEN}>>> $1${NC}"; }
 
 # ── 設定參數 ───────────────────────────────────────────────────
-REPO_URL="https://github.com/Nono0325/Nice.git"
+REPO_URL="https://github.com/Nono0325/Nice1.git"
 REPO_BRANCH="main"
 RUN_USER="${SUDO_USER:-pi}"
 RUN_HOME=$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6)
 RUN_HOME="${RUN_HOME:-/home/$RUN_USER}"
 
-REPO_DIR="${RUN_HOME}/Nice"
+REPO_DIR="${RUN_HOME}/Nice1"
 INSTALL_DIR="${REPO_DIR}/servo_control"
 SERVICE_NAME="servo-control"
 PYTHON_CMD="python3"

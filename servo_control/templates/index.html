@@ -536,55 +536,51 @@
   </div>
 
   <!-- ═══════════════════════════════════════════
-       TAB 4: 範圍設定 (單位: mm)
+       TAB 4: 範圍設定 (支援 µs 與 mm)
   ═══════════════════════════════════════════ -->
   <div class="tab-content fade-in" id="tab-content-settings">
     <div class="grid-2">
       <!-- X 軸設定 -->
       <div class="card">
-        <div class="card-title"><span class="icon">↔️</span>X 軸行程極限設定 (單位: mm)</div>
+        <div class="card-title"><span class="icon">↔️</span>X 軸行程範圍設定 (支援 µs 或 mm)</div>
         <div style="display:flex;flex-direction:column;gap:18px">
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸極限最小值 (mm)</label>
+            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸最小值 (可輸入 µs 或 mm，如 500 或 0)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="xMinInput" value="0.0" min="0" max="300" step="0.5" style="width:100%;font-size:18px;font-weight:700">
-              <span style="font-size:16px;color:var(--accent-cyan);font-weight:700">mm</span>
+              <input type="number" id="xMinInput" value="500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸極限最大值 (mm)</label>
+            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸最大值 (可輸入 µs 或 mm，如 3000 或 250)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="xMaxInput" value="200.0" min="0" max="300" step="0.5" style="width:100%;font-size:18px;font-weight:700">
-              <span style="font-size:16px;color:var(--accent-cyan);font-weight:700">mm</span>
+              <input type="number" id="xMaxInput" value="2500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div style="display:flex;gap:12px;margin-top:8px">
-            <button class="btn btn-primary" style="flex:1" onclick="applyXLimits()">✅ 套用 X 軸極限</button>
+            <button class="btn btn-primary" style="flex:1" onclick="applyXLimits()">✅ 套用 X 軸設定</button>
             <button class="btn" onclick="resetXLimits()">↩️ 重置預設</button>
           </div>
           <div style="background:#0d1117;border-radius:8px;padding:16px;font-size:15px;color:var(--text-sec);border:1px solid var(--border)">
-            <div>當前設定：<span id="curXMin" style="color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-weight:700">0.0</span> ~ <span id="curXMax" style="color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-weight:700">200.0</span> mm</div>
-            <div style="margin-top:6px">有效行程：<span id="curXRange" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">200.0 mm</span></div>
+            <div>當前設定：<span id="curXMin" style="color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-weight:700">500</span> ~ <span id="curXMax" style="color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-weight:700">2500</span> <span id="curXRangeMmLabel" style="color:var(--text-dim);font-size:13px">(0.0 ~ 200.0 mm)</span></div>
+            <div style="margin-top:6px">行程範圍：<span id="curXRange" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">2000 µs (200.0 mm)</span></div>
           </div>
         </div>
       </div>
 
       <!-- Y 軸設定 -->
       <div class="card">
-        <div class="card-title"><span class="icon">↕️</span>Y 軸行程極限設定 (單位: mm)</div>
+        <div class="card-title"><span class="icon">↕️</span>Y 軸行程範圍設定 (支援 µs 或 mm)</div>
         <div style="display:flex;flex-direction:column;gap:18px">
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Y 軸極限最小值 (mm)</label>
+            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Y 軸最小值 (可輸入 µs 或 mm，如 500 或 0)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="yMinInput" value="0.0" min="0" max="300" step="0.5" style="width:100%;font-size:18px;font-weight:700">
-              <span style="font-size:16px;color:var(--accent-green);font-weight:700">mm</span>
+              <input type="number" id="yMinInput" value="500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Y 軸極限最大值 (mm)</label>
+            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Y 軸最大值 (可輸入 µs 或 mm，如 3000 或 250)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="yMaxInput" value="200.0" min="0" max="300" step="0.5" style="width:100%;font-size:18px;font-weight:700">
-              <span style="font-size:16px;color:var(--accent-green);font-weight:700">mm</span>
+              <input type="number" id="yMaxInput" value="2500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px">
@@ -593,12 +589,12 @@
             <span style="font-size:14px;color:var(--accent-green);font-weight:700">同步（推薦）</span>
           </div>
           <div style="display:flex;gap:12px;margin-top:8px">
-            <button class="btn btn-primary" style="flex:1" onclick="applyYLimits()">✅ 套用 Y 軸極限</button>
+            <button class="btn btn-primary" style="flex:1" onclick="applyYLimits()">✅ 套用 Y 軸設定</button>
             <button class="btn" onclick="resetYLimits()">↩️ 重置預設</button>
           </div>
           <div style="background:#0d1117;border-radius:8px;padding:16px;font-size:15px;color:var(--text-sec);border:1px solid var(--border)">
-            <div>當前設定：<span id="curYMin" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">0.0</span> ~ <span id="curYMax" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">200.0</span> mm</div>
-            <div style="margin-top:6px">有效行程：<span id="curYRange" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">200.0 mm</span></div>
+            <div>當前設定：<span id="curYMin" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">500</span> ~ <span id="curYMax" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">2500</span> <span id="curYRangeMmLabel" style="color:var(--text-dim);font-size:13px">(0.0 ~ 200.0 mm)</span></div>
+            <div style="margin-top:6px">行程範圍：<span id="curYRange" style="color:var(--accent-green);font-family:'JetBrains Mono',monospace;font-weight:700">2000 µs (200.0 mm)</span></div>
           </div>
         </div>
       </div>
@@ -606,39 +602,41 @@
 
     <!-- 速度規劃與物理校準 -->
     <div class="card" style="margin-top:20px">
-      <div class="card-title"><span class="icon">⚡</span>馬達加減速、慢速歸零與比例校準設定</div>
+      <div class="card-title"><span class="icon">⚡</span>馬達加減速、慢速歸零與物理比例設定</div>
       <div class="grid-2">
         <div>
-          <h4 style="color:var(--accent-cyan);margin-bottom:14px;font-size:16px">X 軸步進馬達參數</h4>
+          <h4 style="color:var(--accent-cyan);margin-bottom:14px;font-size:16px">X 軸步進馬達設定</h4>
           <div style="display:flex;flex-direction:column;gap:14px">
             <div>
-              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大運行頻率 (Max Speed Hz)</label>
-              <input type="number" id="xMaxSpeedInput" value="2000" min="200" max="5000" step="100" style="width:100%">
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大速度頻率 (Max Speed Hz)</label>
+              <input type="number" id="xMaxSpeedInput" value="2000" min="200" max="10000" step="100" style="width:100%">
             </div>
             <div>
-              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">加減速平滑步數 (Accel Steps)</label>
-              <input type="number" id="xAccelStepsInput" value="100" min="10" max="1000" step="10" style="width:100%">
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">加減速步數 (Accel Steps)</label>
+              <input type="number" id="xAccelStepsInput" value="100" min="10" max="2000" step="10" style="width:100%">
             </div>
             <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">物理行程比例 (µs per mm)</label>
-              <input type="number" id="xScaleInput" value="10.0" min="1" max="100" step="0.1" style="width:100%">
+              <input type="number" id="xScaleInput" value="10.0" min="0.001" max="10000" step="any" style="width:100%">
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 10，則 1mm = 10µs。</div>
             </div>
           </div>
         </div>
         <div>
-          <h4 style="color:var(--accent-green);margin-bottom:14px;font-size:16px">Y 軸步進馬達參數</h4>
+          <h4 style="color:var(--accent-green);margin-bottom:14px;font-size:16px">Y 軸步進馬達設定</h4>
           <div style="display:flex;flex-direction:column;gap:14px">
             <div>
-              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大運行頻率 (Max Speed Hz)</label>
-              <input type="number" id="yMaxSpeedInput" value="2000" min="200" max="5000" step="100" style="width:100%">
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大速度頻率 (Max Speed Hz)</label>
+              <input type="number" id="yMaxSpeedInput" value="2000" min="200" max="10000" step="100" style="width:100%">
             </div>
             <div>
-              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">加減速平滑步數 (Accel Steps)</label>
-              <input type="number" id="yAccelStepsInput" value="100" min="10" max="1000" step="10" style="width:100%">
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">加減速步數 (Accel Steps)</label>
+              <input type="number" id="yAccelStepsInput" value="100" min="10" max="2000" step="10" style="width:100%">
             </div>
             <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">物理行程比例 (µs per mm)</label>
-              <input type="number" id="yScaleInput" value="10.0" min="1" max="100" step="0.1" style="width:100%">
+              <input type="number" id="yScaleInput" value="10.0" min="0.001" max="10000" step="any" style="width:100%">
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 10，則 1mm = 10µs。</div>
             </div>
           </div>
         </div>
@@ -648,15 +646,15 @@
         <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
           <div style="flex:1;min-width:240px">
             <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">歸零緩速逼近頻率 (Homing Speed Hz) — 慢慢歸零避免衝擊</label>
-            <input type="number" id="homingSpeedInput" value="400" min="100" max="1200" step="50" style="width:100%">
+            <input type="number" id="homingSpeedInput" value="400" min="100" max="2000" step="50" style="width:100%">
           </div>
           <div style="flex:1;min-width:240px;font-size:13px;color:var(--text-dim);line-height:1.5">
-            💡 建議設定為 300~500 Hz，步進馬達將平穩前進並在觸發現位開關後緩慢回退 250 步建立精準原點。
+            💡 建議設定為 300~500 Hz，步進馬達將平穩前進並在觸發現位開關後緩慢回退建立精準原點。
           </div>
         </div>
       </div>
       <div style="margin-top:18px;display:flex;gap:12px">
-        <button class="btn btn-primary" style="padding:12px 28px;font-size:16px" onclick="applyAdvancedLimits()">✅ 套用加減速與歸零參數</button>
+        <button class="btn btn-primary" style="padding:12px 28px;font-size:16px" onclick="applyAdvancedLimits()">💾 儲存並套用速度、物理比例 (Scale) 與歸零參數</button>
       </div>
     </div>
 
@@ -748,9 +746,9 @@
     <div class="card" style="margin-top:16px">
       <div class="card-title" style="justify-content:space-between">
         <span><span class="icon">🔄</span>系統更新（GitHub）</span>
-        <a href="https://github.com/Nono0325/Nice" target="_blank"
+        <a href="https://github.com/Nono0325/Nice1" target="_blank"
           style="font-size:11px;color:var(--accent-cyan);text-decoration:none">
-          📦 Nono0325/Nice ↗
+          📦 Nono0325/Nice1 ↗
         </a>
       </div>
 

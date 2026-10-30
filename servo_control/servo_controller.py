@@ -65,6 +65,7 @@ PWM_FREQ     = 50
 PULSE_MIN    = 500      
 PULSE_MAX    = 2500     
 PULSE_CENTER = 1500     
+SYSTEM_PULSE_MAX = 200000  # 支援長行程步進馬達上限 (最高 200,000 µs)
 
 def pulse_to_duty(pulse_us):
     """將脈衝寬度(µs)轉換成對應的 duty cycle，用於網頁顯示"""
@@ -183,12 +184,12 @@ class StepperMotor:
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
-    def set_target(self, target, min_us=500.0, max_us=2500.0):
+    def set_target(self, target, min_us=0.0, max_us=200000.0):
         with self.lock:
             self.target_pos = max(float(min_us), min(float(max_us), float(target)))
             return self.target_pos
 
-    def add_target_delta(self, delta_us, min_us=500.0, max_us=2500.0):
+    def add_target_delta(self, delta_us, min_us=0.0, max_us=200000.0):
         """累加移動量（支援 100+100 快速連續點擊，不被實時當前位置覆蓋）"""
         with self.lock:
             self.target_pos = max(float(min_us), min(float(max_us), self.target_pos + float(delta_us)))
@@ -350,17 +351,16 @@ def cleanup_gpio():
     GPIO.cleanup()
 
 def set_servo_pulse(axis, pulse_us):
-    """設定馬達目標位置"""
-    pulse_us = max(PULSE_MIN, min(PULSE_MAX, pulse_us))
-
+    """設定馬達目標位置（依照設定的軸極限動態限制，不受 2500 限制）"""
     if axis == 'x':
+        pulse_us = max(state['x_min'], min(state['x_max'], float(pulse_us)))
         if x_stepper:
-            x_stepper.set_target(pulse_us)
+            x_stepper.set_target(pulse_us, state['x_min'], state['x_max'])
 
     elif axis in ('y', 'y1', 'y2'):
-        # 由於 Y1/Y2 同步或單一 Y 步進馬達，我們統一設定 y_stepper 的目標
+        pulse_us = max(state['y_min'], min(state['y_max'], float(pulse_us)))
         if y_stepper:
-            y_stepper.set_target(pulse_us)
+            y_stepper.set_target(pulse_us, state['y_min'], state['y_max'])
 
 def set_digital_output(name, value):
     """設定數位輸出"""
@@ -684,18 +684,18 @@ def broadcast_state():
             if x_stepper:
                 state['x_pulse'] = int(x_stepper.current_pos)
                 state['x_pct'] = max(0.0, min(100.0, (x_stepper.current_pos - state['x_min']) / max(1, state['x_max'] - state['x_min']) * 100.0))
-                state['x_mm'] = round(max(0.0, (x_stepper.current_pos - PULSE_MIN) / max(0.1, state['x_scale'])), 1)
+                state['x_mm'] = round(max(0.0, (x_stepper.current_pos - state['x_min']) / max(0.001, state['x_scale'])), 1)
             if y_stepper:
                 state['y1_pulse'] = int(y_stepper.current_pos)
                 state['y2_pulse'] = int(y_stepper.current_pos)
                 state['y_pct'] = max(0.0, min(100.0, (y_stepper.current_pos - state['y_min']) / max(1, state['y_max'] - state['y_min']) * 100.0))
-                state['y_mm'] = round(max(0.0, (y_stepper.current_pos - PULSE_MIN) / max(0.1, state['y_scale'])), 1)
+                state['y_mm'] = round(max(0.0, (y_stepper.current_pos - state['y_min']) / max(0.001, state['y_scale'])), 1)
 
-            # 計算當前 mm 極限
-            state['x_min_mm'] = round((state['x_min'] - PULSE_MIN) / max(0.1, state['x_scale']), 1)
-            state['x_max_mm'] = round((state['x_max'] - PULSE_MIN) / max(0.1, state['x_scale']), 1)
-            state['y_min_mm'] = round((state['y_min'] - PULSE_MIN) / max(0.1, state['y_scale']), 1)
-            state['y_max_mm'] = round((state['y_max'] - PULSE_MIN) / max(0.1, state['y_scale']), 1)
+            # 計算當前 mm 極限（以 x_min/y_min 為起點 0.0 mm）
+            state['x_min_mm'] = 0.0
+            state['x_max_mm'] = round((state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+            state['y_min_mm'] = 0.0
+            state['y_max_mm'] = round((state['y_max'] - state['y_min']) / max(0.001, state['y_scale']), 1)
 
             read_limit_switches()
             state['timestamp'] = datetime.now().strftime('%H:%M:%S.%f')[:-3]
@@ -768,7 +768,8 @@ def api_move():
     if delta_mm is not None:
         delta_us = float(delta_mm) * float(scale)
     if target_mm is not None:
-        target_us = PULSE_MIN + float(target_mm) * float(scale)
+        base_min = state['x_min'] if axis == 'x' else state['y_min']
+        target_us = base_min + float(target_mm) * float(scale)
 
     try:
         if axis == 'x':
@@ -1224,33 +1225,42 @@ def api_set_limits():
     data = request.get_json(silent=True) or {}
     
     # 優先更新比例參數（避免換算 mm 極限時使用舊 scale 或被 0 除）
-    if 'x_scale' in data: state['x_scale'] = max(0.1, float(data['x_scale']))
-    if 'y_scale' in data: state['y_scale'] = max(0.1, float(data['y_scale']))
+    if 'x_scale' in data: 
+        try:
+            state['x_scale'] = max(0.001, float(data['x_scale']))
+        except (ValueError, TypeError):
+            pass
+    if 'y_scale' in data: 
+        try:
+            state['y_scale'] = max(0.001, float(data['y_scale']))
+        except (ValueError, TypeError):
+            pass
 
-    # 支援 mm 設定
+    # 支援 mm 與 µs 設定 X 軸（完全解除 2500µs 限制，最高可設 200,000µs）
     if 'x_min_mm' in data:
         mm = float(data['x_min_mm'])
-        state['x_min'] = max(PULSE_MIN, min(PULSE_MAX, int(PULSE_MIN + mm * state['x_scale'])))
+        state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(mm * state['x_scale'])))
     elif 'x_min' in data:
-        state['x_min'] = max(PULSE_MIN, int(data['x_min']))
+        state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(data['x_min'])))
 
     if 'x_max_mm' in data:
         mm = float(data['x_max_mm'])
-        state['x_max'] = max(state['x_min'] + 10, min(PULSE_MAX, int(PULSE_MIN + mm * state['x_scale'])))
+        state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(state['x_min'] + mm * state['x_scale'])))
     elif 'x_max' in data:
-        state['x_max'] = min(PULSE_MAX, int(data['x_max']))
+        state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(data['x_max'])))
 
+    # 支援 mm 與 µs 設定 Y 軸
     if 'y_min_mm' in data:
         mm = float(data['y_min_mm'])
-        state['y_min'] = max(PULSE_MIN, min(PULSE_MAX, int(PULSE_MIN + mm * state['y_scale'])))
+        state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(mm * state['y_scale'])))
     elif 'y_min' in data:
-        state['y_min'] = max(PULSE_MIN, int(data['y_min']))
+        state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(data['y_min'])))
 
     if 'y_max_mm' in data:
         mm = float(data['y_max_mm'])
-        state['y_max'] = max(state['y_min'] + 10, min(PULSE_MAX, int(PULSE_MIN + mm * state['y_scale'])))
+        state['y_max'] = max(state['y_min'] + 1, min(SYSTEM_PULSE_MAX, int(state['y_min'] + mm * state['y_scale'])))
     elif 'y_max' in data:
-        state['y_max'] = min(PULSE_MAX, int(data['y_max']))
+        state['y_max'] = max(state['y_min'] + 1, min(SYSTEM_PULSE_MAX, int(data['y_max'])))
 
     if 'y_sync' in data:
         state['y_sync'] = bool(data['y_sync'])
@@ -1269,19 +1279,19 @@ def api_set_limits():
         if y_stepper: y_stepper.accel_steps = float(data['y_accel_steps'])
         
     if 'homing_speed_hz' in data:
-        state['homing_speed_hz'] = max(100.0, min(1200.0, float(data['homing_speed_hz'])))
+        state['homing_speed_hz'] = max(100.0, min(2000.0, float(data['homing_speed_hz'])))
     
-    x_min_mm = round((state['x_min'] - PULSE_MIN) / state['x_scale'], 1)
-    x_max_mm = round((state['x_max'] - PULSE_MIN) / state['x_scale'], 1)
-    y_min_mm = round((state['y_min'] - PULSE_MIN) / state['y_scale'], 1)
-    y_max_mm = round((state['y_max'] - PULSE_MIN) / state['y_scale'], 1)
+    state['x_min_mm'] = 0.0
+    state['x_max_mm'] = round((state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+    state['y_min_mm'] = 0.0
+    state['y_max_mm'] = round((state['y_max'] - state['y_min']) / max(0.001, state['y_scale']), 1)
 
-    add_history(f"更新系統極限與參數 (X: {x_min_mm}~{x_max_mm}mm, Y: {y_min_mm}~{y_max_mm}mm)", "success")
+    add_history(f"更新行程範圍與參數: X({state['x_min']}~{state['x_max']}µs, 0~{state['x_max_mm']}mm, 比例:{state['x_scale']}), Y({state['y_min']}~{state['y_max']}µs, 0~{state['y_max_mm']}mm, 比例:{state['y_scale']})", "success")
     return jsonify({'ok': True, 'limits': {
         'x_min': state['x_min'], 'x_max': state['x_max'],
         'y_min': state['y_min'], 'y_max': state['y_max'],
-        'x_min_mm': x_min_mm, 'x_max_mm': x_max_mm,
-        'y_min_mm': y_min_mm, 'y_max_mm': y_max_mm,
+        'x_min_mm': state['x_min_mm'], 'x_max_mm': state['x_max_mm'],
+        'y_min_mm': state['y_min_mm'], 'y_max_mm': state['y_max_mm'],
         'y_sync': state['y_sync'],
         'x_max_speed': state['x_max_speed'], 'x_accel_steps': state['x_accel_steps'],
         'y_max_speed': state['y_max_speed'], 'y_accel_steps': state['y_accel_steps'],

@@ -287,15 +287,10 @@ function updateUI() {
 
   // 進階設定輸入值綁定 (非使用者正在編輯時才同步)
   if (!settingsDirty) {
-    const curXMinMm = s.x_min_mm !== undefined ? s.x_min_mm : ((s.x_min - 500) / xScale);
-    const curXMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : ((s.x_max - 500) / xScale);
-    const curYMinMm = s.y_min_mm !== undefined ? s.y_min_mm : ((s.y_min - 500) / yScale);
-    const curYMaxMm = s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - 500) / yScale);
-
-    setElValue('xMinInput', curXMinMm.toFixed(1));
-    setElValue('xMaxInput', curXMaxMm.toFixed(1));
-    setElValue('yMinInput', curYMinMm.toFixed(1));
-    setElValue('yMaxInput', curYMaxMm.toFixed(1));
+    setElValue('xMinInput', s.x_min);
+    setElValue('xMaxInput', s.x_max);
+    setElValue('yMinInput', s.y_min);
+    setElValue('yMaxInput', s.y_max);
 
     setElValue('xMaxSpeedInput', s.x_max_speed || 2000);
     setElValue('xAccelStepsInput', s.x_accel_steps || 100);
@@ -361,18 +356,26 @@ function updateUI() {
     gpioTag.textContent = s.gpio_mode;
   }
 
-  // 範圍設定顯示 (以 mm 為主)
-  const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : ((s.x_min - 500) / xScale);
-  const xMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : ((s.x_max - 500) / xScale);
-  const yMinMm = s.y_min_mm !== undefined ? s.y_min_mm : ((s.y_min - 500) / yScale);
-  const yMaxMm = s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - 500) / yScale);
+  // 範圍設定顯示 (同時顯示 µs 與 mm)
+  const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : 0.0;
+  const xMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : ((s.x_max - s.x_min) / Math.max(0.001, xScale));
+  const yMinMm = s.y_min_mm !== undefined ? s.y_min_mm : 0.0;
+  const yMaxMm = s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - s.y_min) / Math.max(0.001, yScale));
 
-  setElText('curXMin', xMinMm.toFixed(1));
-  setElText('curXMax', xMaxMm.toFixed(1));
-  setElText('curXRange', `${(xMaxMm - xMinMm).toFixed(1)} mm`);
-  setElText('curYMin', yMinMm.toFixed(1));
-  setElText('curYMax', yMaxMm.toFixed(1));
-  setElText('curYRange', `${(yMaxMm - yMinMm).toFixed(1)} mm`);
+  const curXRangeUs = s.x_max - s.x_min;
+  const curXRangeMm = (xMaxMm - xMinMm).toFixed(1);
+  const curYRangeUs = s.y_max - s.y_min;
+  const curYRangeMm = (yMaxMm - yMinMm).toFixed(1);
+
+  setElText('curXMin', `${s.x_min}`);
+  setElText('curXMax', `${s.x_max}`);
+  setElText('curXRangeMmLabel', `(${xMinMm.toFixed(1)} ~ ${xMaxMm.toFixed(1)} mm)`);
+  setElText('curXRange', `${curXRangeUs} µs (${curXRangeMm} mm)`);
+
+  setElText('curYMin', `${s.y_min}`);
+  setElText('curYMax', `${s.y_max}`);
+  setElText('curYRangeMmLabel', `(${yMinMm.toFixed(1)} ~ ${yMaxMm.toFixed(1)} mm)`);
+  setElText('curYRange', `${curYRangeUs} µs (${curYRangeMm} mm)`);
 
   // GPIO 模式橫幅（診斷頁）
   const modeTitle = document.getElementById('diagModeTitle');
@@ -563,45 +566,59 @@ function setYSync(val) {
   toast(`Y 軸同步: ${val ? 'ON' : 'OFF'}`, 'info');
 }
 
-// ── 範圍設定 (單位: mm) ────────────────────────────────────────
+// ── 範圍設定 (支援直接輸入 µs 或 mm) ──────────────────────────────────
 async function applyXLimits() {
-  const xMinMm = parseFloat(document.getElementById('xMinInput').value);
-  const xMaxMm = parseFloat(document.getElementById('xMaxInput').value);
-  if (isNaN(xMinMm) || isNaN(xMaxMm) || xMinMm >= xMaxMm) {
+  const xMinVal = parseFloat(document.getElementById('xMinInput').value);
+  const xMaxVal = parseFloat(document.getElementById('xMaxInput').value);
+  if (isNaN(xMinVal) || isNaN(xMaxVal) || xMinVal >= xMaxVal) {
     toast('最小值必須小於最大值', 'error');
     return;
   }
-  const r = await apiPost('/api/set_limits', { x_min_mm: xMinMm, x_max_mm: xMaxMm });
+  let payload = {};
+  if (xMaxVal > 400) {
+    payload = { x_min: xMinVal, x_max: xMaxVal };
+  } else {
+    payload = { x_min_mm: xMinVal, x_max_mm: xMaxVal };
+  }
+  const r = await apiPost('/api/set_limits', payload);
   if (r.ok) {
-    toast(`X 軸極限設定: ${xMinMm.toFixed(1)} ~ ${xMaxMm.toFixed(1)} mm`, 'success');
-    addLog(`X軸極限: ${xMinMm.toFixed(1)} ~ ${xMaxMm.toFixed(1)} mm`, 'success');
+    toast(`✅ X 軸行程設定成功！`, 'success');
+    addLog(`X軸極限更新`, 'success');
+    clearSettingsDirty();
   }
 }
 
 async function applyYLimits() {
-  const yMinMm = parseFloat(document.getElementById('yMinInput').value);
-  const yMaxMm = parseFloat(document.getElementById('yMaxInput').value);
-  const sync = document.getElementById('ySyncSetting').checked;
-  if (isNaN(yMinMm) || isNaN(yMaxMm) || yMinMm >= yMaxMm) {
+  const yMinVal = parseFloat(document.getElementById('yMinInput').value);
+  const yMaxVal = parseFloat(document.getElementById('yMaxInput').value);
+  const sync = document.getElementById('ySyncSetting')?.checked ?? true;
+  if (isNaN(yMinVal) || isNaN(yMaxVal) || yMinVal >= yMaxVal) {
     toast('最小值必須小於最大值', 'error');
     return;
   }
-  const r = await apiPost('/api/set_limits', { y_min_mm: yMinMm, y_max_mm: yMaxMm, y_sync: sync });
+  let payload = {};
+  if (yMaxVal > 400) {
+    payload = { y_min: yMinVal, y_max: yMaxVal, y_sync: sync };
+  } else {
+    payload = { y_min_mm: yMinVal, y_max_mm: yMaxVal, y_sync: sync };
+  }
+  const r = await apiPost('/api/set_limits', payload);
   if (r.ok) {
-    toast(`Y 軸極限設定: ${yMinMm.toFixed(1)} ~ ${yMaxMm.toFixed(1)} mm`, 'success');
-    addLog(`Y軸極限: ${yMinMm.toFixed(1)} ~ ${yMaxMm.toFixed(1)} mm`, 'success');
+    toast(`✅ Y 軸行程設定成功！`, 'success');
+    addLog(`Y軸極限更新`, 'success');
+    clearSettingsDirty();
   }
 }
 
 function resetXLimits() {
-  document.getElementById('xMinInput').value = '0.0';
-  document.getElementById('xMaxInput').value = '200.0';
+  document.getElementById('xMinInput').value = '500';
+  document.getElementById('xMaxInput').value = '2500';
   applyXLimits();
 }
 
 function resetYLimits() {
-  document.getElementById('yMinInput').value = '0.0';
-  document.getElementById('yMaxInput').value = '200.0';
+  document.getElementById('yMinInput').value = '500';
+  document.getElementById('yMaxInput').value = '2500';
   applyYLimits();
 }
 
@@ -749,7 +766,8 @@ async function applyAdvancedLimits() {
     homing_speed_hz: homingSpeed
   });
   if (r.ok) {
-    toast('進階加減速、慢速歸零與校準參數已套用！', 'success');
+    toast(`✅ 速度、加減速與物理比例已成功儲存！(X比例: 1mm=${xScale}µs, Y比例: 1mm=${yScale}µs)`, 'success');
+    addLog(`參數儲存: X比例=${xScale}µs/mm, Y比例=${yScale}µs/mm`, 'success');
     clearSettingsDirty();
   }
 }

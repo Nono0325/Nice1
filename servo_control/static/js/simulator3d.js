@@ -110,25 +110,26 @@ function init3D() {
   zArm.castShadow = true;
   sliderY.add(zArm);
 
-  // 5.4. 吸嘴末端吸盤 (Suction Cup)
-  const cupGeo = new THREE.CylinderGeometry(0.35, 0.45, 0.4, 16);
-  const cupMat = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.9 });
+  // 5.4. 吸嘴末端圓形強力電磁鐵 (Circular Electromagnet DC 5V/6V/12V/24V)
+  const cupGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.35, 32);
+  const cupMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.95, roughness: 0.15 });
   const cup = new THREE.Mesh(cupGeo, cupMat);
   cup.position.y = -1.6; // 位於 Z-arm 最底部
   zArm.add(cup);
 
-  // 5.5. 吸嘴吸力指示點 (Led Light)
-  const ledGeo = new THREE.SphereGeometry(0.08, 8, 8);
+  // 5.5. 電磁鐵通電/磁力指示光圈
+  const ringGeo = new THREE.TorusGeometry(0.42, 0.05, 8, 24);
   const ledMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
-  suctionTip = new THREE.Mesh(ledGeo, ledMat);
-  suctionTip.position.y = -1.8;
+  suctionTip = new THREE.Mesh(ringGeo, ledMat);
+  suctionTip.rotation.x = Math.PI / 2;
+  suctionTip.position.y = -1.78;
   zArm.add(suctionTip);
 
-  // 6. 建立工件 (Workpiece - 紅色小積木)
-  const workpieceGeo = new THREE.BoxGeometry(1.2, 0.8, 1.2);
-  const workpieceMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 });
+  // 6. 建立金屬工件 (Workpiece - 工業金屬衝壓件)
+  const workpieceGeo = new THREE.BoxGeometry(1.4, 0.4, 1.4);
+  const workpieceMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.8, roughness: 0.2 });
   workpiece = new THREE.Mesh(workpieceGeo, workpieceMat);
-  workpiece.position.set(-8.0, 0.6, -2.0); // 初始放在取件點
+  workpiece.position.set(-8.0, 0.6, -2.0); // 初始放在取件點 A
   workpiece.castShadow = true;
   scene.add(workpiece);
 
@@ -177,15 +178,20 @@ function update3D(stateData) {
   const pulseX = stateData.x_pulse || 1500;
   targetX = -8.0 + ((pulseX - 500) / 2000.0) * 16.0;
 
-  // 2. Y 軸行程範圍 500 ~ 2500 us -> 映射至 Three.js Z 軸範圍 -6.0 到 +6.0 單位
+  // 2. Y 軸行程保留相容 (或固定於中間)
   const pulseY = stateData.y1_pulse || 1500;
   targetZ = -6.0 + ((pulseY - 500) / 2000.0) * 12.0;
 
-  // 3. Z-axis arm 上升/下降映射 (下降：z_down = true)
-  targetArmY = stateData.arm_down ? 0.3 : 1.8;
+  // 3. Z-axis arm 上升/下降映射 (500us=最下E點/0.3, 2500us=頂部D點/1.8)
+  const pulseZ = stateData.z_pulse !== undefined ? stateData.z_pulse : (stateData.y1_pulse || 1500);
+  if (stateData.z_pulse !== undefined) {
+    targetArmY = 0.3 + ((pulseZ - 500) / 2000.0) * 1.5;
+  } else {
+    targetArmY = stateData.arm_down ? 0.3 : 1.8;
+  }
 
-  // 4. 真空吸盤致能狀態
-  isVacuumActive = !!stateData.vacuum;
+  // 4. 圓形直流電磁鐵致能狀態
+  isVacuumActive = !!(stateData.magnet !== undefined ? stateData.magnet : stateData.vacuum);
   
   // 更新 HMI 的狀態文字
   const statusEl = document.getElementById('sim3d-status');

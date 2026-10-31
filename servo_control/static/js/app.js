@@ -8,18 +8,21 @@ const socket = io({ transports: ['websocket', 'polling'] });
 
 // ── 全域狀態 ──────────────────────────────────────────────────
 let state = {
-  x_pulse: 1500, y1_pulse: 1500, y2_pulse: 1500,
-  x_mm: 100.0, y_mm: 100.0,
-  x_pct: 50, y_pct: 50,
-  vacuum: false, z_down: false,
+  x_pulse: 1500, z_pulse: 1500, y1_pulse: 1500, y2_pulse: 1500,
+  x_mm: 100.0, z_mm: 100.0, y_mm: 100.0,
+  x_pct: 50, z_pct: 50, y_pct: 50,
+  magnet: false, vacuum: false, z_down: false,
   system_run: false, arm_down: false,
   pickup_active: false, error: false, error_msg: '',
-  lim_left: false, lim_right: false, lim_up: false, lim_down: false,
-  x_min: 500, x_max: 2500, y_min: 500, y_max: 2500,
-  x_min_mm: 0.0, x_max_mm: 200.0, y_min_mm: 0.0, y_max_mm: 200.0,
-  y_sync: true,
-  x_scale: 10.0, y_scale: 10.0,
+  lim_x_a: false, lim_x_b: false, lim_x_c: false, lim_z_d: false, lim_z_e: false,
+  hall_arm_metal: false, press_done: false,
+  lim_left: false, lim_mid: false, lim_right: false, lim_up: false, lim_down: false, hall_metal: false,
+  x_min: 500, x_max: 2500, z_min: 500, z_max: 2500, y_min: 500, y_max: 2500,
+  x_min_mm: 0.0, x_max_mm: 200.0, z_min_mm: 0.0, z_max_mm: 200.0, y_min_mm: 0.0, y_max_mm: 200.0,
+  y_sync: true, z_sync: true,
+  x_scale: 10.0, z_scale: 10.0, y_scale: 10.0,
   x_max_speed: 2000.0, x_accel_steps: 100.0,
+  z_max_speed: 2000.0, z_accel_steps: 100.0,
   y_max_speed: 2000.0, y_accel_steps: 100.0,
   homing_speed_hz: 400.0,
   motor_locked: true,
@@ -243,11 +246,15 @@ function updateUI() {
   }
 
   // 指示燈
-  setLamp('lamp-pickup',  s.pickup_active ? 'amber' : 'off');
-  setLamp('lamp-armdown', s.arm_down      ? 'amber' : 'off');
-  setLamp('lamp-vacuum',  s.vacuum        ? 'amber' : 'off');
-  setLamp('lamp-limleft',  s.lim_left  ? 'red' : 'off');
-  setLamp('lamp-limright', s.lim_right ? 'red' : 'off');
+  setLamp('lamp-pickup',   s.pickup_active ? 'amber' : 'off');
+  setLamp('lamp-armdown',  s.arm_down      ? 'amber' : 'off');
+  setLamp('lamp-vacuum',   (s.magnet || s.vacuum) ? 'amber' : 'off');
+  setLamp('lamp-metal',    (s.hall_arm_metal || s.hall_metal) ? 'green' : 'off');
+  setLamp('lamp-limleft',  (s.lim_x_a || s.lim_left)  ? 'red' : 'off');
+  setLamp('lamp-limmid',   (s.lim_x_b || s.lim_mid)   ? 'red' : 'off');
+  setLamp('lamp-limright', (s.lim_x_c || s.lim_right) ? 'red' : 'off');
+  setLamp('lamp-limup',    (s.lim_z_d || s.lim_up)    ? 'red' : 'off');
+  setLamp('lamp-limdown',  (s.lim_z_e || s.lim_down)  ? 'red' : 'off');
   setLamp('lamp-error',    s.error     ? 'red' : 'off');
 
   // 錯誤橫幅
@@ -269,35 +276,36 @@ function updateUI() {
 
   // 真實物理座標 (mm)
   const xScale = s.x_scale || 10.0;
-  const yScale = s.y_scale || 10.0;
+  const zScale = s.z_scale || s.y_scale || 10.0;
   const xMm = s.x_mm !== undefined ? s.x_mm : ((s.x_pulse - 500) / xScale);
   setEl('xMmDisplay', el => el.textContent = `${xMm.toFixed(1)} mm`);
   setEl('xMmCurVal', el => el.textContent = `${xMm.toFixed(1)} mm`);
 
-  // Y 軸位置軌跡與數值
-  const yPct = Math.max(0, Math.min(100, s.y_pct || 0));
-  setEl('yBar', el => el.style.width = `${yPct}%`);
-  setEl('yPctDisplay', el => el.textContent = `${yPct.toFixed(1)}%`);
-  setEl('y1PulseDisplay', el => el.textContent = `${s.y1_pulse} µs`);
-  setEl('y2PulseDisplay', el => el.textContent = `${s.y2_pulse} µs`);
-  setEl('yPulseVal', el => el.textContent = `${s.y1_pulse} µs`);
-  const yMm = s.y_mm !== undefined ? s.y_mm : ((s.y1_pulse - 500) / yScale);
-  setEl('yMmDisplay', el => el.textContent = `${yMm.toFixed(1)} mm`);
-  setEl('yMmCurVal', el => el.textContent = `${yMm.toFixed(1)} mm`);
+  // Z 軸位置軌跡與數值 (原 Y 軸改為 Z 軸)
+  const zPulse = s.z_pulse !== undefined ? s.z_pulse : s.y1_pulse;
+  const zPct = Math.max(0, Math.min(100, s.z_pct !== undefined ? s.z_pct : (s.y_pct || 0)));
+  setEl('yBar', el => el.style.width = `${zPct}%`);
+  setEl('yPctDisplay', el => el.textContent = `${zPct.toFixed(1)}%`);
+  setEl('y1PulseDisplay', el => el.textContent = `${zPulse} µs`);
+  setEl('y2PulseDisplay', el => el.textContent = `${zPulse} µs`);
+  setEl('yPulseVal', el => el.textContent = `${zPulse} µs`);
+  const zMm = s.z_mm !== undefined ? s.z_mm : ((zPulse - 500) / zScale);
+  setEl('yMmDisplay', el => el.textContent = `${zMm.toFixed(1)} mm`);
+  setEl('yMmCurVal', el => el.textContent = `${zMm.toFixed(1)} mm`);
 
   // 進階設定輸入值綁定 (非使用者正在編輯時才同步)
   if (!settingsDirty) {
     setElValue('xMinInput', s.x_min);
     setElValue('xMaxInput', s.x_max);
-    setElValue('yMinInput', s.y_min);
-    setElValue('yMaxInput', s.y_max);
+    setElValue('yMinInput', s.z_min !== undefined ? s.z_min : s.y_min);
+    setElValue('yMaxInput', s.z_max !== undefined ? s.z_max : s.y_max);
 
     setElValue('xMaxSpeedInput', s.x_max_speed || 2000);
     setElValue('xAccelStepsInput', s.x_accel_steps || 100);
     setElValue('xScaleInput', s.x_scale || 10);
-    setElValue('yMaxSpeedInput', s.y_max_speed || 2000);
-    setElValue('yAccelStepsInput', s.y_accel_steps || 100);
-    setElValue('yScaleInput', s.y_scale || 10);
+    setElValue('yMaxSpeedInput', s.z_max_speed || s.y_max_speed || 2000);
+    setElValue('yAccelStepsInput', s.z_accel_steps || s.y_accel_steps || 100);
+    setElValue('yScaleInput', s.z_scale || s.y_scale || 10);
     setElValue('homingSpeedInput', s.homing_speed_hz || 400);
   }
 
@@ -305,27 +313,29 @@ function updateUI() {
   const lockBtn = document.getElementById('btnMotorLock');
   if (lockBtn) lockBtn.className = 'btn-amber-toggle' + (s.motor_locked ? ' on' : '');
 
-  // Arm Down / Vacuum 切換按鈕
+  // Arm Down / Vacuum (電磁鐵) 切換按鈕
   const zBtn = document.getElementById('btnZDown');
   if (zBtn) zBtn.className = `btn-amber-toggle${s.z_down ? ' on' : ''}`;
   const vacBtn = document.getElementById('btnVacuum');
-  if (vacBtn) vacBtn.className = `btn-amber-toggle${s.vacuum ? ' on' : ''}`;
+  if (vacBtn) vacBtn.className = `btn-amber-toggle${(s.magnet || s.vacuum) ? ' on' : ''}`;
 
   // 監控 Tab - 量規
   drawGauge('gaugeX',  s.x_pulse,  s.x_min,  s.x_max,  '#3b82f6');
-  drawGauge('gaugeY1', s.y1_pulse, s.y_min,  s.y_max,  '#10b981');
-  drawGauge('gaugeY2', s.y2_pulse, s.y_min,  s.y_max,  '#8b5cf6');
+  drawGauge('gaugeY1', zPulse,     s.z_min || s.y_min,  s.z_max || s.y_max,  '#10b981');
+  drawGauge('gaugeY2', zPulse,     s.z_min || s.y_min,  s.z_max || s.y_max,  '#8b5cf6');
   setEl('gaugeXVal',  el => el.textContent = `${s.x_pulse} µs`);
-  setEl('gaugeY1Val', el => el.textContent = `${s.y1_pulse} µs`);
-  setEl('gaugeY2Val', el => el.textContent = `${s.y2_pulse} µs`);
+  setEl('gaugeY1Val', el => el.textContent = `${zPulse} µs`);
+  setEl('gaugeY2Val', el => el.textContent = `${zPulse} µs`);
 
-  // 監控 Tab - 數位 I/O
-  updateTag('mon-vacuum', s.vacuum, '🟢 ON', '⚫ OFF', 'tag-green', 'tag-red');
-  updateTag('mon-zdown',  s.z_down, '🟢 ON', '⚫ OFF', 'tag-green', 'tag-red');
-  updateTag('mon-limleft',  s.lim_left,  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
-  updateTag('mon-limright', s.lim_right, '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
-  updateTag('mon-limup',    s.lim_up,    '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
-  updateTag('mon-limdown',  s.lim_down,  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
+  // 監控 Tab - 數位 I/O 與 HN-1805-E1 接近開關
+  updateTag('mon-vacuum', (s.magnet || s.vacuum), '🟢 通電 ON', '⚫ 斷電 OFF', 'tag-green', 'tag-red');
+  updateTag('mon-metal', (s.hall_arm_metal || s.hall_metal), '🟢 已吸附金屬', '⚪ 未吸附', 'tag-green', 'tag-blue');
+  updateTag('mon-press', (s.press_done !== undefined ? s.press_done : true), '🟢 完成', '⏳ 等待中', 'tag-green', 'tag-amber');
+  updateTag('mon-limleft',  (s.lim_x_a || s.lim_left),  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
+  updateTag('mon-limmid',   (s.lim_x_b || s.lim_mid),   '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
+  updateTag('mon-limright', (s.lim_x_c || s.lim_right), '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
+  updateTag('mon-limup',    (s.lim_z_d || s.lim_up),    '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
+  updateTag('mon-limdown',  (s.lim_z_e || s.lim_down),  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
 
   // 訊號檢測 Tab
   const duty = (µs) => ((µs / 20000) * 100).toFixed(3);
@@ -510,9 +520,12 @@ async function cmdHome(axis) {
 }
 
 async function cmdPickup() {
-  if (!state.system_run) { toast('請先啟動系統', 'error'); return; }
-  const r = await apiPost('/api/pickup');
-  if (r.ok) { toast('自動取件流程啟動', 'success'); addLog('自動取件流程啟動', 'success'); }
+  if (!state.system_run) { toast('請先啟動系統 (START PB)', 'error'); return; }
+  const r = await apiPost('/api/stamping_cycle');
+  if (r.ok) { 
+    toast('🚀 衝壓搬運自動循環 (14 步 Cycle) 啟動！', 'success'); 
+    addLog('衝壓自動循環 (14 步 Cycle) 啟動', 'success'); 
+  }
 }
 
 // ── 馬達移動 (支援 100+100 累加與 mm 單位) ─────────────────────────
@@ -542,11 +555,13 @@ function setStepCustom(sizeMm) {
 
 // ── 數位輸出 ─────────────────────────────────────────────────
 async function toggleVacuum() {
-  const r = await apiPost('/api/vacuum', { on: !state.vacuum });
+  const nextVal = !(state.magnet || state.vacuum);
+  const r = await apiPost('/api/magnet', { on: nextVal });
   if (r.ok) {
-    const status = r.vacuum ? '吸盤 ON' : '吸盤 OFF';
-    toast(status, r.vacuum ? 'success' : 'info');
-    addLog(status, r.vacuum ? 'success' : 'info');
+    const isNowOn = r.magnet || r.vacuum;
+    const status = isNowOn ? '🧲 圓形電磁鐵 通電吸料 ON' : '⚪ 圓形電磁鐵 斷電釋放 OFF';
+    toast(status, isNowOn ? 'success' : 'info');
+    addLog(status, isNowOn ? 'success' : 'info');
   }
 }
 
@@ -1691,8 +1706,9 @@ document.addEventListener('keydown', (e) => {
   switch (e.key) {
     case 'ArrowLeft':  e.preventDefault(); moveAxis('x', -1); break;
     case 'ArrowRight': e.preventDefault(); moveAxis('x',  1); break;
-    case 'ArrowUp':    e.preventDefault(); moveAxis('y',  1); break;
-    case 'ArrowDown':  e.preventDefault(); moveAxis('y', -1); break;
+    case 'ArrowUp':    e.preventDefault(); moveAxis('z',  1); break;
+    case 'ArrowDown':  e.preventDefault(); moveAxis('z', -1); break;
+    case 'm': case 'M':
     case 'v': case 'V': toggleVacuum(); break;
     case 'z': case 'Z': toggleZDown(); break;
     case 'h': case 'H': cmdHome('all'); break;

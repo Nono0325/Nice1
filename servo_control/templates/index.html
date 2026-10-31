@@ -133,29 +133,41 @@
       </div>
     </div>
 
-    <!-- 狀態指示燈列（仿照 PPT）-->
+    <!-- 狀態指示燈列（工業級感測與電磁鐵狀態）-->
     <div class="card" style="margin-bottom:16px">
-      <div class="card-title"><span class="icon">💡</span>作業狀態顯示</div>
-      <div class="indicator-row">
+      <div class="card-title"><span class="icon">💡</span>作業狀態與接近感測顯示</div>
+      <div class="indicator-row" style="flex-wrap:wrap;gap:12px">
         <div class="indicator-group">
-          <div class="indicator-label">Start Pickup</div>
+          <div class="indicator-label">14步 Cycle</div>
           <div class="indicator-lamp off" id="lamp-pickup"></div>
         </div>
         <div class="indicator-group">
-          <div class="indicator-label">Arm Down</div>
-          <div class="indicator-lamp off" id="lamp-armdown"></div>
-        </div>
-        <div class="indicator-group">
-          <div class="indicator-label">Vacuum</div>
+          <div class="indicator-label">電磁鐵吸盤</div>
           <div class="indicator-lamp off" id="lamp-vacuum"></div>
         </div>
         <div class="indicator-group">
-          <div class="indicator-label">Lim LEFT</div>
-          <div class="indicator-lamp off" id="lamp-limleft"></div>
+          <div class="indicator-label">手臂金屬霍爾</div>
+          <div class="indicator-lamp off" id="lamp-metal"></div>
         </div>
         <div class="indicator-group">
-          <div class="indicator-label">Lim RIGHT</div>
-          <div class="indicator-lamp off" id="lamp-limright"></div>
+          <div class="indicator-label">X-a(歸零)</div>
+          <div class="indicator-lamp off" id="lamp-limleft" title="HN-1805-E1 a點歸零接近開關"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">X-b(中間)</div>
+          <div class="indicator-lamp off" id="lamp-limmid" title="HN-1805-E1 b點中間模具接近開關"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">X-c(右極限)</div>
+          <div class="indicator-lamp off" id="lamp-limright" title="HN-1805-E1 c點右極限接近開關"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">Z-d(上歸零)</div>
+          <div class="indicator-lamp off" id="lamp-limup" title="HN-1805-E1 d點向上歸零接近開關"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">Z-e(下極限)</div>
+          <div class="indicator-lamp off" id="lamp-limdown" title="HN-1805-E1 e點向下極限接近開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">Error</div>
@@ -167,7 +179,7 @@
     <!-- X 軸位置條（數位即時軌跡）-->
     <div class="position-bar-section">
       <div class="position-bar-header">
-        <span class="section-title">X 軸位置座標</span>
+        <span class="section-title">X 軸位置座標 (橫向滑台)</span>
         <div style="display:flex;gap:16px;align-items:center">
           <div class="position-value-display" id="xMmDisplay" style="color:var(--accent-cyan)">100.0 mm</div>
           <div class="position-badge" id="xPctDisplay">50.0%</div>
@@ -175,9 +187,9 @@
         </div>
       </div>
       <div class="position-bar-labels">
-        <span>0.0 mm (LEFT)</span>
-        <span>100.0 mm (CENTER)</span>
-        <span>200.0 mm (RIGHT)</span>
+        <span>0.0 mm (a點: 歸零)</span>
+        <span>100.0 mm (b點: 中間模具位)</span>
+        <span>200.0 mm (c點: 右極限放料)</span>
       </div>
       <div class="position-track" id="xTrack" style="cursor:pointer" title="點擊設定 X 軸位置">
         <div class="position-track-inner" id="xBar" style="width:50%"></div>
@@ -190,14 +202,14 @@
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-sec)">
-        <span>0 mm</span><span>50 mm</span><span>100 mm</span><span>150 mm</span><span>200 mm</span>
+        <span>a點 (0 mm)</span><span>50 mm</span><span>b點 (100 mm)</span><span>150 mm</span><span>c點 (200 mm)</span>
       </div>
     </div>
 
-    <!-- Y 軸位置條（數位即時軌跡）-->
+    <!-- Z 軸位置條（垂直升降軌跡）-->
     <div class="position-bar-section">
       <div class="position-bar-header">
-        <span class="section-title">Y 軸位置座標</span>
+        <span class="section-title">Z 軸位置座標 (垂直升降軸)</span>
         <div style="display:flex;gap:16px;align-items:center">
           <div class="position-value-display" id="yMmDisplay" style="color:var(--accent-green)">100.0 mm</div>
           <div class="position-badge" id="yPctDisplay">50.0%</div>
@@ -205,11 +217,11 @@
         </div>
       </div>
       <div class="position-bar-labels">
-        <span>0.0 mm (DOWN)</span>
-        <span>100.0 mm (MIDDLE)</span>
-        <span>200.0 mm (UP)</span>
+        <span>0.0 mm (e點: 向下極限/取料面)</span>
+        <span>100.0 mm (50% 避讓高度)</span>
+        <span>200.0 mm (d點: 向上歸零/安全高度)</span>
       </div>
-      <div class="position-track" id="yTrack" style="cursor:pointer" title="點擊設定 Y 軸位置">
+      <div class="position-track" id="yTrack" style="cursor:pointer" title="點擊設定 Z 軸位置">
         <div class="position-track-inner" id="yBar" style="width:50%;background:linear-gradient(90deg,#065f46,#059669,#10b981)"></div>
         <div style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;justify-content:space-between;padding:0 4px;align-items:flex-end;pointer-events:none">
           <div class="position-tick-line"></div>
@@ -220,21 +232,21 @@
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-sec)">
-        <span>0 mm</span><span>50 mm</span><span>100 mm</span><span>150 mm</span><span>200 mm</span>
+        <span>e點 (0 mm)</span><span>50 mm</span><span>50% (100 mm)</span><span>150 mm</span><span>d點 (200 mm)</span>
       </div>
     </div>
 
     <div class="grid-2" style="margin-top:20px">
       <!-- X 軸控制 -->
       <div class="card">
-        <div class="card-title"><span class="icon">↔️</span>X 軸移動控制（向左 / 向右）</div>
+        <div class="card-title"><span class="icon">↔️</span>X 軸移動控制（向左 a 點 / 向右 c 點）</div>
         <div style="display:flex;align-items:center;justify-content:space-around;margin:16px 0">
-          <button class="step-btn large" id="xLeftBtn" onclick="moveAxis('x',-1)" title="左移 (累加移動)">◀</button>
+          <button class="step-btn large" id="xLeftBtn" onclick="moveAxis('x',-1)" title="左移往 a 點">◀</button>
           <div style="text-align:center">
             <div class="value-display large-text" id="xMmCurVal">100.0 mm</div>
             <div style="font-size:13px;color:var(--text-sec);margin-top:6px">當前 X 座標</div>
           </div>
-          <button class="step-btn large" id="xRightBtn" onclick="moveAxis('x',1)" title="右移 (累加移動)">▶</button>
+          <button class="step-btn large" id="xRightBtn" onclick="moveAxis('x',1)" title="右移往 c 點">▶</button>
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;flex-wrap:wrap;gap:10px">
           <span style="font-size:15px;font-weight:600;color:var(--text-sec)">步進移動量 (mm):</span>
@@ -256,30 +268,30 @@
         </div>
         <div class="divider"></div>
         <div style="display:flex;gap:12px">
-          <button class="btn btn-primary" id="btnHomeX" style="flex:1;font-size:16px" onclick="cmdHome('x')">🏠 X 軸平穩歸零</button>
+          <button class="btn btn-primary" id="btnHomeX" style="flex:1;font-size:16px" onclick="cmdHome('x')">🏠 X 軸平穩歸零 (a點)</button>
         </div>
       </div>
 
-      <!-- Y 軸控制 -->
+      <!-- Z 軸控制 (原 Y 軸改為 Z 軸) -->
       <div class="card">
-        <div class="card-title"><span class="icon">↕️</span>Y 軸移動控制（向上 / 向下）</div>
+        <div class="card-title"><span class="icon">↕️</span>Z 軸移動控制（向上 d 點 / 向下 e 點）</div>
         <div style="display:flex;align-items:center;justify-content:space-around;margin:16px 0">
           <div style="text-align:center">
             <div class="value-display large-text" id="yMmCurVal">100.0 mm</div>
-            <div style="font-size:13px;color:var(--text-sec);margin-top:6px">當前 Y 座標</div>
+            <div style="font-size:13px;color:var(--text-sec);margin-top:6px">當前 Z 座標</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:12px">
-            <button class="step-btn large" onclick="moveAxis('y',1)" title="上移 (累加移動)">▲</button>
-            <button class="step-btn large" onclick="moveAxis('y',-1)" title="下移 (累加移動)">▼</button>
+            <button class="step-btn large" onclick="moveAxis('z',1)" title="上移 (往 d 點安全高度)">▲</button>
+            <button class="step-btn large" onclick="moveAxis('z',-1)" title="下移 (往 e 點取放深度)">▼</button>
           </div>
           <div style="text-align:center">
             <div class="value-display large-text" id="yPulseVal">1500 µs</div>
-            <div style="font-size:13px;color:var(--text-sec);margin-top:6px">Y1/Y2 Pulse</div>
+            <div style="font-size:13px;color:var(--text-sec);margin-top:6px">Z Pulse</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px">
           <div style="display:flex;align-items:center;gap:10px">
-            <label style="font-size:15px;font-weight:600;color:var(--text-sec)">Y 軸雙驅同步:</label>
+            <label style="font-size:15px;font-weight:600;color:var(--text-sec)">Z 軸同步致能:</label>
             <input type="checkbox" id="ySyncCheck" checked onchange="setYSync(this.checked)" style="transform:scale(1.3)">
             <span id="ySyncLabel" style="font-size:14px;font-weight:700;color:var(--accent-green)">ON</span>
           </div>
@@ -287,72 +299,74 @@
         </div>
         <div class="divider"></div>
         <div style="display:flex;gap:12px">
-          <button class="btn btn-primary" id="btnHomeY" style="flex:1;font-size:16px" onclick="cmdHome('y')">🏠 Y 軸平穩歸零</button>
+          <button class="btn btn-primary" id="btnHomeY" style="flex:1;font-size:16px" onclick="cmdHome('z')">🏠 Z 軸平穩歸零 (d點向上)</button>
         </div>
       </div>
     </div>
 
     <!-- 動作控制 -->
     <div class="card" style="margin-top:16px">
-      <div class="card-title"><span class="icon">🤖</span>動作控制</div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+      <div class="card-title"><span class="icon">🤖</span>致動器與衝壓自動化控制</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
 
-        <!-- Z_DOWN 手臂控制 -->
+        <!-- 圓形電磁鐵強吸力吸盤控制 -->
         <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-          <span style="font-size:12px;color:var(--text-dim)">Arm Down</span>
-          <button class="btn-amber-toggle" id="btnZDown" onclick="toggleZDown()" title="手臂上下"></button>
-        </div>
-
-        <!-- 吸盤控制 -->
-        <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-          <span style="font-size:12px;color:var(--text-dim)">Vacuum</span>
-          <button class="btn-amber-toggle" id="btnVacuum" onclick="toggleVacuum()" title="吸盤開關"></button>
+          <span style="font-size:13px;font-weight:600;color:var(--accent-amber)">圓形電磁鐵吸盤</span>
+          <button class="btn-amber-toggle" id="btnVacuum" onclick="toggleVacuum()" title="電磁鐵通電/斷電"></button>
         </div>
 
         <!-- 馬達致能鎖定控制 -->
         <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-          <span style="font-size:12px;color:var(--text-dim)">Motor Lock</span>
-          <button class="btn-amber-toggle on" id="btnMotorLock" onclick="toggleMotorLock()" title="鎖定/釋放馬達" style="background-color: var(--accent-green)"></button>
+          <span style="font-size:13px;font-weight:600;color:var(--text-dim)">馬達致能鎖定</span>
+          <button class="btn-amber-toggle on" id="btnMotorLock" onclick="toggleMotorLock()" title="鎖定/釋放步進馬達" style="background-color: var(--accent-green)"></button>
         </div>
 
         <div class="divider" style="width:1px;height:60px;margin:0 8px"></div>
 
-        <!-- 自動取件 -->
-        <button class="btn btn-success" style="padding:14px 24px;font-size:14px" onclick="cmdPickup()" id="btnPickup">
-          🔄 自動取件流程
+        <!-- 衝壓搬運自動循環 (14 步) -->
+        <button class="btn btn-success" style="padding:14px 28px;font-size:15px;font-weight:700" onclick="cmdPickup()" id="btnPickup">
+          🔄 衝壓搬運自動循環 (14 步 Cycle)
         </button>
 
         <!-- 全部歸零 -->
         <button class="btn btn-warning" id="btnHomeAll" style="padding:14px 24px;font-size:14px" onclick="cmdHome('all')">
-          🏠 全部歸零
+          🏠 全部歸零 (X-a / Z-d)
         </button>
-        <span id="homingIndicator" style="display:none;font-size:12px;color:var(--accent-amber);animation:pulse 0.8s infinite alternate">⏳ 歸零中...</span>
+        <span id="homingIndicator" style="display:none;font-size:13px;color:var(--accent-amber);animation:pulse 0.8s infinite alternate">⏳ 歸零中...</span>
       </div>
     </div>
 
-    <!-- 工作流程圖 -->
-    <div class="card" id="flowchartCard" style="margin-top:16px;display:none">
-      <div class="card-title"><span><span class="icon">📋</span>自動取件工作流程 (PPT 設計)</span></div>
-      <div class="flowchart-container">
-        <div class="flow-step" id="step-init">開機 / 初始化</div>
+    <!-- 14 步自動衝壓工作流程圖 -->
+    <div class="card" id="flowchartCard" style="margin-top:16px">
+      <div class="card-title"><span><span class="icon">📋</span>衝壓機 14 步自動循環搬運流程 (Motion Pattern)</span></div>
+      <div class="flowchart-container" style="flex-wrap:wrap;gap:8px;line-height:2">
+        <div class="flow-step" id="step-home1">1. X回a點</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-home1">回原點</div>
+        <div class="flow-step" id="step-move-mold1">2. Z下去(e)</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-check-mold">確認模具</div>
+        <div class="flow-step" id="step-suck">3. 磁鐵通電</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-move-mold1">移動到模具一</div>
+        <div class="flow-step" id="step-check-mold">4. Z上去(d)</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-suck">磁吸工件</div>
+        <div class="flow-step" id="step-check-suck">5. 霍爾金屬感測</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-check-suck">確認已磁吸？</div>
+        <div class="flow-step" id="step-move-mold2">6. X到c點</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-move-mold2">移動到模具二</div>
+        <div class="flow-step" id="step-drop">7. Z下去(e)</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-drop">放下工件</div>
+        <div class="flow-step" id="step-check-drop">8. 磁鐵關電</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-check-drop">確認已放下？</div>
+        <div class="flow-step" id="step-home2">9. Z上去(d)</div>
         <div class="flow-arrow">➡</div>
-        <div class="flow-step" id="step-home2">回原點</div>
+        <div class="flow-step" id="step-move-b">10. X到b點</div>
+        <div class="flow-arrow">➡</div>
+        <div class="flow-step" id="step-half-down">11. Z下去50%</div>
+        <div class="flow-arrow">➡</div>
+        <div class="flow-step" id="step-wait-press">12. 等模具衝壓完</div>
+        <div class="flow-arrow">➡</div>
+        <div class="flow-step" id="step-up-again">13. Z上去(d)</div>
+        <div class="flow-arrow">➡</div>
+        <div class="flow-step" id="step-cycle-done">14. X回a點 (完成)</div>
       </div>
     </div>
 
@@ -398,27 +412,29 @@
       </div>
     </div>
 
-    <!-- 數位 I/O 狀態 -->
+    <!-- 數位 I/O 與接近開關狀態 -->
     <div class="grid-2" style="margin-bottom:16px">
       <div class="card">
-        <div class="card-title"><span class="icon">🔌</span>數位輸出</div>
+        <div class="card-title"><span class="icon">🔌</span>數位輸出與手臂感測</div>
         <table class="diag-table">
-          <thead><tr><th>信號</th><th>GPIO</th><th>狀態</th></tr></thead>
+          <thead><tr><th>裝置 / 信號</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
-            <tr><td>VACUUM 吸盤</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
-            <tr><td>Z_DOWN 手臂</td><td>GPIO 25</td><td><span class="tag" id="mon-zdown">OFF</span></td></tr>
+            <tr><td>圓形電磁鐵強吸力吸盤 (DC 12V/24V)</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
+            <tr><td>手臂金屬檢測霍爾感測器</td><td>GPIO 6</td><td><span class="tag" id="mon-metal">未吸附</span></td></tr>
+            <tr><td>衝壓模具完成回授 (PRESS_DONE)</td><td>GPIO 5</td><td><span class="tag" id="mon-press">就緒</span></td></tr>
           </tbody>
         </table>
       </div>
       <div class="card">
-        <div class="card-title"><span class="icon">🔒</span>限位開關</div>
+        <div class="card-title"><span class="icon">🔒</span>電感式接近開關 (HN-1805-E1 24V NPN 常開)</div>
         <table class="diag-table">
-          <thead><tr><th>開關</th><th>GPIO</th><th>狀態</th></tr></thead>
+          <thead><tr><th>開關位置 (工位)</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
-            <tr><td>LIM LEFT</td><td>GPIO 17</td><td><span class="tag" id="mon-limleft">正常</span></td></tr>
-            <tr><td>LIM RIGHT</td><td>GPIO 27</td><td><span class="tag" id="mon-limright">正常</span></td></tr>
-            <tr><td>LIM UP</td><td>GPIO 22</td><td><span class="tag" id="mon-limup">正常</span></td></tr>
-            <tr><td>LIM DOWN</td><td>GPIO 23</td><td><span class="tag" id="mon-limdown">正常</span></td></tr>
+            <tr><td>X 軸 a 點 (左歸零原點)</td><td>GPIO 17</td><td><span class="tag" id="mon-limleft">正常</span></td></tr>
+            <tr><td>X 軸 b 點 (中間衝壓模具位)</td><td>GPIO 25</td><td><span class="tag" id="mon-limmid">正常</span></td></tr>
+            <tr><td>X 軸 c 點 (向右極限放料位)</td><td>GPIO 27</td><td><span class="tag" id="mon-limright">正常</span></td></tr>
+            <tr><td>Z 軸 d 點 (向上歸零安全高度)</td><td>GPIO 22</td><td><span class="tag" id="mon-limup">正常</span></td></tr>
+            <tr><td>Z 軸 e 點 (向下極限取料面)</td><td>GPIO 23</td><td><span class="tag" id="mon-limdown">正常</span></td></tr>
           </tbody>
         </table>
       </div>
@@ -788,20 +804,22 @@
 
     <!-- GPIO 引腳對應圖 -->
     <div class="card" style="margin-top:16px">
-      <div class="card-title"><span class="icon">📌</span>GPIO 引腳對應（BCM 編號）</div>
+      <div class="card-title"><span class="icon">📌</span>GPIO 引腳對應（BCM 編號 - 工業硬體配置）</div>
       <div class="pin-map">
         <div class="pin-item"><span class="pin-number">GPIO 12</span><span class="pin-name">X_PUL 步進脈衝</span><div class="pin-dot" style="background:var(--accent-blue)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 16</span><span class="pin-name">X_DIR 步進方向</span><div class="pin-dot" style="background:var(--accent-blue)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 20</span><span class="pin-name">X_ENA 步進致能</span><div class="pin-dot" style="background:var(--accent-blue)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 13</span><span class="pin-name">Y_PUL 步進脈衝</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 19</span><span class="pin-name">Y_DIR 步進方向</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 26</span><span class="pin-name">Y_ENA 步進致能</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">VACUUM 吸盤繼電器</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 25</span><span class="pin-name">Z_DOWN 手臂繼電器</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 17</span><span class="pin-name">限位開關 LEFT (INPUT_PULLUP)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 27</span><span class="pin-name">限位開關 RIGHT (INPUT_PULLUP)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 22</span><span class="pin-name">限位開關 UP (INPUT_PULLUP)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 23</span><span class="pin-name">限位開關 DOWN (INPUT_PULLUP)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 13</span><span class="pin-name">Z_PUL 步進脈衝 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 19</span><span class="pin-name">Z_DIR 步進方向 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 26</span><span class="pin-name">Z_ENA 步進致能 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET 圓形電磁鐵繼電器</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 6</span><span class="pin-name">手臂金屬檢測霍爾開關 (DI)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 5</span><span class="pin-name">衝壓機完成訊號 (PRESS_DONE)</span><div class="pin-dot" style="background:var(--accent-cyan)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 17</span><span class="pin-name">X-a點 歸零接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 25</span><span class="pin-name">X-b點 中間模具接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 27</span><span class="pin-name">X-c點 右極限接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 22</span><span class="pin-name">Z-d點 上歸零接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 23</span><span class="pin-name">Z-e點 下極限接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
       </div>
     </div>
   </div>

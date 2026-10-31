@@ -27,6 +27,8 @@ import threading
 import json
 import subprocess
 import secrets
+import gc
+from collections import deque
 from datetime import datetime
 
 # ── Flask / SocketIO ──────────────────────────────────────────────
@@ -185,6 +187,15 @@ state = {
 
     # 歸零執行狀態
     'is_homing': False,
+
+    # ── 工業級連續運轉與壽命安全機制 (24/7/365 Continuous Mode) ──
+    'continuous_mode':    False,   # 連續生產運轉模式
+    'cycle_count':        0,       # 累計完成衝壓循環計數
+    'cycle_target':       0,       # 目標生產次數 (0 = 無限制連續生產)
+    'cycle_interval_sec': 1.0,     # 循環間隔緩衝時間 (秒)
+    'uptime_sec':         0,       # 系統連續運行秒數
+    'watchdog_active':    False,   # 硬體看門狗晶片守護狀態
+    'magnet_on_time':     0.0,     # 電磁鐵通電起始時間戳 (防過熱保護)
 
     # 最後更新時間
     'timestamp': '',
@@ -427,30 +438,43 @@ def set_servo_pulse(axis, pulse_us):
             st.set_target(pulse_us, z_min, z_max)
 
 def set_digital_output(name, value):
-    """設定數位輸出 (圓形電磁鐵吸盤 / 手臂)"""
+    """設定數位輸出 (圓形電磁鐵吸盤 / 手臂)，含電磁鐵超時計時器防過熱保護"""
     name = name.lower()
     if name in ('magnet', 'vacuum'):
-        state['magnet'] = bool(value)
-        state['vacuum'] = bool(value)
+        val_bool = bool(value)
+        state['magnet'] = val_bool
+        state['vacuum'] = val_bool
+        state['magnet_on_time'] = time.time() if val_bool else 0.0
         if IS_RASPBERRY_PI:
-            GPIO.output(PIN['MAGNET'], GPIO.HIGH if value else GPIO.LOW)
+            GPIO.output(PIN['MAGNET'], GPIO.HIGH if val_bool else GPIO.LOW)
 
     elif name == 'z_down':
         state['z_down'] = bool(value)
         state['arm_down'] = bool(value)
 
 def read_limit_switches():
-    """讀取所有電感式接近開關 (HN-1805-E1 方形 24V NPN 常開) 與 手臂霍爾感測器"""
+    """讀取所有電感式接近開關 (HN-1805-E1 方形 24V NPN 常開) 與 手臂霍爾感測器 (具備 3-Sample 工業數位防彈跳濾波)"""
     global x_stepper, z_stepper, y_stepper
     if IS_RASPBERRY_PI:
-        # NPN 常開開關感應金屬時輸出接通 GND(0V)，在內部上拉下讀入為 LOW -> not 為 True
-        state['lim_x_a'] = not GPIO.input(PIN['LIM_X_A'])
-        state['lim_x_b'] = not GPIO.input(PIN['LIM_X_B'])
-        state['lim_x_c'] = not GPIO.input(PIN['LIM_X_C'])
-        state['lim_z_d'] = not GPIO.input(PIN['LIM_Z_D'])
-        state['lim_z_e'] = not GPIO.input(PIN['LIM_Z_E'])
-        state['hall_arm_metal'] = not GPIO.input(PIN['HALL_ARM_METAL'])
-        state['press_done'] = not GPIO.input(PIN['PRESS_DONE'])
+        # 工業抗干擾數位濾波 (Digital Debounce Filter)：連續 3 次取樣確認低電位，過濾衝壓電氣火花雜訊
+        pins = [
+            PIN['LIM_X_A'], PIN['LIM_X_B'], PIN['LIM_X_C'],
+            PIN['LIM_Z_D'], PIN['LIM_Z_E'], PIN['HALL_ARM_METAL'], PIN['PRESS_DONE']
+        ]
+        readings = [0] * len(pins)
+        for _ in range(3):
+            for i, p in enumerate(pins):
+                if not GPIO.input(p): # NPN 常開開關感應金屬時輸出接通 GND(0V)，低電位觸發
+                    readings[i] += 1
+            time.sleep(0.001)
+
+        state['lim_x_a'] = readings[0] == 3
+        state['lim_x_b'] = readings[1] == 3
+        state['lim_x_c'] = readings[2] == 3
+        state['lim_z_d'] = readings[3] == 3
+        state['lim_z_e'] = readings[4] == 3
+        state['hall_arm_metal'] = readings[5] == 3
+        state['press_done'] = readings[6] == 3
     else:
         # 模擬模式：根據步進馬達當前位置計算感測器觸發
         if x_stepper:
@@ -753,6 +777,8 @@ def broadcast_state():
     """每 100ms 廣播狀態到所有客戶端"""
     global x_stepper, z_stepper, y_stepper
     sim_t = 0
+    sim_tick = 0
+    t_system_start = time.time()
     while True:
         try:
             # 同步實時馬達位置與百分比、物理 mm 座標至系統狀態中
@@ -806,6 +832,14 @@ def broadcast_state():
                     pwm_history['y1'].pop(0)
                     pwm_history['y2'].pop(0)
 
+            # ── 電磁鐵連續通電過熱防護 (超過 45 秒強制斷電防燒毀) ────
+            if state.get('magnet') and state.get('magnet_on_time', 0.0) > 0:
+                if time.time() - state['magnet_on_time'] > 45.0:
+                    set_digital_output('magnet', False)
+                    state['error'] = True
+                    state['error_msg'] = "電磁鐵連續通電超過 45 秒，強制斷電保護"
+                    add_history("⚠️ 安全保護：電磁鐵連續吸附超過 45 秒，強制斷電防線圈過熱！", "warn")
+
             payload = {
                 **state,
                 'pwm_history': {
@@ -819,6 +853,19 @@ def broadcast_state():
 
         except Exception as e:
             pass
+
+        # ── 系統持續運轉壽命守護（GC 垃圾回收 + 歷史紀錄非同步批次存檔）──
+        sim_tick += 1
+        state['uptime_sec'] = int(time.time() - t_system_start)
+
+        # 每 30 分鐘 (18,000 次 100ms tick) 執行主動垃圾回收，防止長週期記憶體碎片
+        if sim_tick % 18000 == 0:
+            gc.collect()
+
+        # 每 5 分鐘 (3,000 次 100ms tick) 若有新日誌才非同步刷入 SD 卡，延長 MicroSD 壽命
+        if sim_tick % 3000 == 0:
+            if history_dirty:
+                save_history()
 
         time.sleep(0.1)
 
@@ -927,39 +974,67 @@ def api_set_position():
 
     return jsonify({'ok': True})
 
-# ── 操作歷史紀錄與巨集功能 ───────────────────────────────────────────
+# ── 操作歷史紀錄與巨集功能 (MicroSD 卡壽命防護：記憶體環形緩衝區) ────────
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'history_log.json')
 MACROS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'macros.json')
 
-def load_history():
+history_lock = threading.Lock()
+history_buffer = deque(maxlen=250)
+history_dirty = False
+
+def init_history():
+    """啟動時載入歷史紀錄至記憶體緩衝區"""
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
+                entries = json.load(f)
+                if isinstance(entries, list):
+                    for item in entries[-250:]:
+                        history_buffer.append(item)
+        except Exception as e:
+            print(f"[WARN] Failed to load history: {e}")
 
-def save_history(history_list):
+init_history()
+
+def load_history():
+    with history_lock:
+        return list(history_buffer)
+
+def save_history(history_list=None):
+    """批次刷入磁碟（僅在背景定時或重大錯誤時寫入，保護 SD 卡壽命）"""
+    global history_dirty
+    with history_lock:
+        if history_list is not None and isinstance(history_list, list):
+            history_buffer.clear()
+            for item in history_list[-250:]:
+                history_buffer.append(item)
+        data_to_write = list(history_buffer)
+        history_dirty = False
+
     try:
         with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(history_list, f, ensure_ascii=False, indent=2)
+            json.dump(data_to_write, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[ERROR] Failed to save history: {e}")
 
 def add_history(msg, type='info'):
+    """新增日誌記錄（即時寫入 RAM 緩衝區並透過 WebSocket 廣播，杜絕 SD 卡磨損）"""
+    global history_dirty
     time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     log_entry = {
         'time': time_str,
         'msg': msg,
         'type': type
     }
-    history = load_history()
-    history.append(log_entry)
-    if len(history) > 500:
-        history.pop(0)
-    save_history(history)
+    with history_lock:
+        history_buffer.append(log_entry)
+        history_dirty = True
+
     socketio.emit('new_history', log_entry)
+
+    # 重大錯誤 (error) 時才立即安全刷盤存檔
+    if type == 'error':
+        save_history()
 
 def load_macros():
     if os.path.exists(MACROS_FILE):
@@ -1251,7 +1326,8 @@ def api_pickup():
 
     def stamping_cycle_sequence():
         state['pickup_active'] = True
-        add_history("🚀 衝壓自動化取放料循環開始 (14 步標準週期)", "success")
+        mode_str = "連續生產模式" if state.get('continuous_mode') else "單次循環模式"
+        add_history(f"🚀 衝壓自動化取放料開始運轉 ({mode_str}，目標: {state['cycle_target']} 次)", "success")
         try:
             st_x = x_stepper
             st_z = z_stepper or y_stepper
@@ -1262,130 +1338,169 @@ def api_pickup():
             pos_z_e = float(state.get('z_min', state['y_min']))              # e 點 (向下極限/取放深度)
             pos_z_half = float((pos_z_d + pos_z_e) / 2.0)                    # 下去一半 (50%)
 
-            # 步驟 1: X 軸回到 a 點
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'home1', 'desc': '1. X軸回到a點(歸零)'})
-            add_history("步驟 1/14: X 軸前往 a 點 (歸零點)...", "info")
-            set_servo_pulse('x', pos_x_a)
-            if not _wait_motor_reach(st_x, pos_x_a): return
-            time.sleep(0.2)
-
-            # 步驟 2: Z 軸下去 (到達 e 點)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'move-mold1', 'desc': '2. Z軸下降至e點'})
-            add_history("步驟 2/14: Z 軸下降至 e 點 (向下極限取料面)...", "info")
-            set_servo_pulse('z', pos_z_e)
-            if not _wait_motor_reach(st_z, pos_z_e): return
-            time.sleep(0.2)
-
-            # 步驟 3: 圓形電磁鐵通電吸料
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'suck', 'desc': '3. 電磁鐵通電吸料'})
-            add_history("步驟 3/14: 圓形電磁鐵通電，強磁力吸附金屬工件", "info")
-            set_digital_output('magnet', True)
-            time.sleep(0.4)
-
-            # 步驟 4: Z 軸上去 (到達 d 點)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'check-mold', 'desc': '4. Z軸上升至d點'})
-            add_history("步驟 4/14: Z 軸上升至 d 點 (安全高度)...", "info")
-            set_servo_pulse('z', pos_z_d)
-            if not _wait_motor_reach(st_z, pos_z_d): return
-            time.sleep(0.2)
-
-            # 步驟 5: 手臂霍爾感測金屬是否存在 (安全防呆檢查)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'check-suck', 'desc': '5. 霍爾感測金屬檢測'})
-            add_history("步驟 5/14: 讀取手臂霍爾感測器，驗證金屬是否存在...", "info")
-            read_limit_switches()
-            if not state.get('hall_arm_metal'):
-                add_history("❌ 警報：手臂霍爾未檢測到金屬工件！取料失敗，緊急中斷！", "error")
-                set_digital_output('magnet', False)
-                state['error'] = True
-                state['error_msg'] = "手臂霍爾未檢測到金屬工件，自動循環中止"
-                return
-            add_history("✔ 霍爾感測確認：金屬工件吸附正常！", "success")
-            time.sleep(0.2)
-
-            # 步驟 6: X 軸到 c 點 (向右極限/放料點)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'move-mold2', 'desc': '6. X軸前往c點'})
-            add_history("步驟 6/14: X 軸移動至 c 點 (向右極限放料點)...", "info")
-            set_servo_pulse('x', pos_x_c)
-            if not _wait_motor_reach(st_x, pos_x_c): return
-            time.sleep(0.2)
-
-            # 步驟 7: Z 軸下去 (到達 e 點)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'drop', 'desc': '7. Z軸下降至e點'})
-            add_history("步驟 7/14: Z 軸下降至 e 點 (放料深度)...", "info")
-            set_servo_pulse('z', pos_z_e)
-            if not _wait_motor_reach(st_z, pos_z_e): return
-            time.sleep(0.2)
-
-            # 步驟 8: 圓形電磁鐵關電 (釋放工件)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'check-drop', 'desc': '8. 電磁鐵關電釋放'})
-            add_history("步驟 8/14: 圓形電磁鐵斷電，工件已釋放", "info")
-            set_digital_output('magnet', False)
-            time.sleep(0.4)
-
-            # 步驟 9: Z 軸上去 (到達 d 點)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'home2', 'desc': '9. Z軸上升至d點'})
-            add_history("步驟 9/14: Z 軸上升至 d 點 (安全高度)...", "info")
-            set_servo_pulse('z', pos_z_d)
-            if not _wait_motor_reach(st_z, pos_z_d): return
-            time.sleep(0.2)
-
-            # 步驟 10: X 軸到 b 點 (中間模具工位接近開關)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'move-b', 'desc': '10. X軸前往b點'})
-            add_history("步驟 10/14: X 軸移動至 b 點 (中間電感接近開關工位)...", "info")
-            set_servo_pulse('x', pos_x_b)
-            if not _wait_motor_reach(st_x, pos_x_b): return
-            time.sleep(0.2)
-
-            # 步驟 11: Z 軸下去一半 (50% 避讓高度)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'half-down', 'desc': '11. Z軸下去一半'})
-            add_history("步驟 11/14: Z 軸下降至 50% 中間避讓高度...", "info")
-            set_servo_pulse('z', pos_z_half)
-            if not _wait_motor_reach(st_z, pos_z_half): return
-            time.sleep(0.2)
-
-            # 步驟 12: 等模具衝壓完
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'wait-press', 'desc': '12. 等待衝壓完畢'})
-            add_history("步驟 12/14: 等候模具衝壓完畢訊號 (PRESS_DONE)...", "info")
-            t_press_start = time.time()
             while state['pickup_active'] and state['system_run']:
+                # 步驟 1: X 軸回到 a 點
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'home1', 'desc': '1. X軸回到a點(歸零)'})
+                add_history("步驟 1/14: X 軸前往 a 點 (歸零點)...", "info")
+                set_servo_pulse('x', pos_x_a)
+                if not _wait_motor_reach(st_x, pos_x_a): break
+                # [開環失步即時校正]: 若接近開關 a 已感應觸發，自動重置校準坐標
+                if state.get('lim_x_a') and st_x:
+                    st_x.set_position(pos_x_a)
+                time.sleep(0.2)
+
+                # 步驟 2: Z 軸下去 (到達 e 點)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'move-mold1', 'desc': '2. Z軸下降至e點'})
+                add_history("步驟 2/14: Z 軸下降至 e 點 (向下極限取料面)...", "info")
+                set_servo_pulse('z', pos_z_e)
+                if not _wait_motor_reach(st_z, pos_z_e): break
+                time.sleep(0.2)
+
+                # 步驟 3: 圓形電磁鐵通電吸料
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'suck', 'desc': '3. 電磁鐵通電吸料'})
+                add_history("步驟 3/14: 圓形電磁鐵通電，強磁力吸附金屬工件", "info")
+                set_digital_output('magnet', True)
+                time.sleep(0.4)
+
+                # 步驟 4: Z 軸上去 (到達 d 點)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'check-mold', 'desc': '4. Z軸上升至d點'})
+                add_history("步驟 4/14: Z 軸上升至 d 點 (安全高度)...", "info")
+                set_servo_pulse('z', pos_z_d)
+                if not _wait_motor_reach(st_z, pos_z_d): break
+                # [Z軸失步校準]: 若頂部接近開關 d 觸發，對齊頂部坐標
+                if state.get('lim_z_d') and st_z:
+                    st_z.set_position(pos_z_d)
+                time.sleep(0.2)
+
+                # 步驟 5: 手臂霍爾感測金屬是否存在 (安全防呆檢查)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'check-suck', 'desc': '5. 霍爾感測金屬檢測'})
+                add_history("步驟 5/14: 讀取手臂霍爾感測器，驗證金屬是否存在...", "info")
                 read_limit_switches()
-                if state.get('press_done') or (not IS_RASPBERRY_PI and (time.time() - t_press_start >= 1.5)):
+                if not state.get('hall_arm_metal'):
+                    add_history("❌ 警報：手臂霍爾未檢測到金屬工件！取料失敗，緊急中斷！", "error")
+                    set_digital_output('magnet', False)
+                    state['error'] = True
+                    state['error_msg'] = "手臂霍爾未檢測到金屬工件，自動循環中止"
+                    return
+                add_history("✔ 霍爾感測確認：金屬工件吸附正常！", "success")
+                time.sleep(0.2)
+
+                # 步驟 6: X 軸到 c 點 (向右極限/放料點)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'move-mold2', 'desc': '6. X軸前往c點'})
+                add_history("步驟 6/14: X 軸移動至 c 點 (向右極限放料點)...", "info")
+                set_servo_pulse('x', pos_x_c)
+                if not _wait_motor_reach(st_x, pos_x_c): break
+                time.sleep(0.2)
+
+                # 步驟 7: Z 軸下去 (到達 e 點)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'drop', 'desc': '7. Z軸下降至e點'})
+                add_history("步驟 7/14: Z 軸下降至 e 點 (放料深度)...", "info")
+                set_servo_pulse('z', pos_z_e)
+                if not _wait_motor_reach(st_z, pos_z_e): break
+                time.sleep(0.2)
+
+                # 步驟 8: 圓形電磁鐵關電 (釋放工件)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'check-drop', 'desc': '8. 電磁鐵關電釋放'})
+                add_history("步驟 8/14: 圓形電磁鐵斷電，工件已釋放", "info")
+                set_digital_output('magnet', False)
+                time.sleep(0.4)
+
+                # 步驟 9: Z 軸上去 (到達 d 點)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'home2', 'desc': '9. Z軸上升至d點'})
+                add_history("步驟 9/14: Z 軸上升至 d 點 (安全高度)...", "info")
+                set_servo_pulse('z', pos_z_d)
+                if not _wait_motor_reach(st_z, pos_z_d): break
+                if state.get('lim_z_d') and st_z:
+                    st_z.set_position(pos_z_d)
+                time.sleep(0.2)
+
+                # 步驟 10: X 軸到 b 點 (中間模具工位接近開關)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'move-b', 'desc': '10. X軸前往b點'})
+                add_history("步驟 10/14: X 軸移動至 b 點 (中間電感接近開關工位)...", "info")
+                set_servo_pulse('x', pos_x_b)
+                if not _wait_motor_reach(st_x, pos_x_b): break
+                time.sleep(0.2)
+
+                # 步驟 11: Z 軸下去一半 (50% 避讓高度)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'half-down', 'desc': '11. Z軸下去一半'})
+                add_history("步驟 11/14: Z 軸下降至 50% 中間避讓高度...", "info")
+                set_servo_pulse('z', pos_z_half)
+                if not _wait_motor_reach(st_z, pos_z_half): break
+                time.sleep(0.2)
+
+                # 步驟 12: 等模具衝壓完
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'wait-press', 'desc': '12. 等待衝壓完畢'})
+                add_history("步驟 12/14: 等候模具衝壓完畢訊號 (PRESS_DONE)...", "info")
+                t_press_start = time.time()
+                while state['pickup_active'] and state['system_run']:
+                    read_limit_switches()
+                    if state.get('press_done') or (not IS_RASPBERRY_PI and (time.time() - t_press_start >= 1.5)):
+                        break
+                    if time.time() - t_press_start > 15.0:
+                        add_history("衝壓等待警告：模具訊號超時，自動繼續", "warn")
+                        break
+                    time.sleep(0.1)
+                add_history("✔ 模具衝壓完成！", "success")
+                time.sleep(0.2)
+
+                # 步驟 13: Z 軸上去 (到達 d 點)
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'up-again', 'desc': '13. Z軸上去d點'})
+                add_history("步驟 13/14: Z 軸上升至 d 點 (安全高度)...", "info")
+                set_servo_pulse('z', pos_z_d)
+                if not _wait_motor_reach(st_z, pos_z_d): break
+                if state.get('lim_z_d') and st_z:
+                    st_z.set_position(pos_z_d)
+                time.sleep(0.2)
+
+                # 步驟 14: X 軸回到 a 點
+                if not state['system_run']: break
+                socketio.emit('pickup_step', {'step': 'cycle-done', 'desc': '14. X軸回a點完成'})
+                add_history("步驟 14/14: X 軸回到 a 點 (原點)...", "info")
+                set_servo_pulse('x', pos_x_a)
+                if not _wait_motor_reach(st_x, pos_x_a): break
+                if state.get('lim_x_a') and st_x:
+                    st_x.set_position(pos_x_a)
+
+                # ── 單一循環圓滿完成，更新生產計數 ──────────────────
+                state['cycle_count'] += 1
+                socketio.emit('cycle_update', {
+                    'cycle_count': state['cycle_count'],
+                    'cycle_target': state['cycle_target'],
+                    'continuous_mode': state['continuous_mode']
+                })
+                add_history(f"🎉 衝壓循環第 {state['cycle_count']} 次完成！", "success")
+
+                # 若非連續模式，直接跳出結束
+                if not state.get('continuous_mode', False):
                     break
-                if time.time() - t_press_start > 15.0:
-                    add_history("衝壓等待警告：模具訊號超時，自動繼續", "warn")
+
+                # 若已達成設定之目標生產件數，自動停止
+                if state.get('cycle_target', 0) > 0 and state['cycle_count'] >= state['cycle_target']:
+                    add_history(f"🏁 已達設定目標生產量 ({state['cycle_target']} 次)，連續循環自動安全停機！", "success")
                     break
-                time.sleep(0.1)
-            add_history("✔ 模具衝壓完成！", "success")
-            time.sleep(0.2)
 
-            # 步驟 13: Z 軸上去 (到達 d 點)
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'up-again', 'desc': '13. Z軸上去d點'})
-            add_history("步驟 13/14: Z 軸上升至 d 點 (安全高度)...", "info")
-            set_servo_pulse('z', pos_z_d)
-            if not _wait_motor_reach(st_z, pos_z_d): return
-            time.sleep(0.2)
+                # 連續模式：等待間隔秒數，快速響應取消中斷
+                interval = max(0.1, float(state.get('cycle_interval_sec', 1.0)))
+                t_delay_start = time.time()
+                while time.time() - t_delay_start < interval:
+                    if not (state['pickup_active'] and state['system_run']):
+                        break
+                    time.sleep(0.05)
 
-            # 步驟 14: X 軸回到 a 點
-            if not state['system_run']: return
-            socketio.emit('pickup_step', {'step': 'cycle-done', 'desc': '14. X軸回a點完成'})
-            add_history("步驟 14/14: X 軸回到 a 點 (原點)...", "info")
-            set_servo_pulse('x', pos_x_a)
-            if not _wait_motor_reach(st_x, pos_x_a): return
-
-            add_history("🎉 恭喜！一個完整衝壓循環 (Cycle) 順利完成！", "success")
+            add_history(f"衝壓搬運流程就緒 (累計完成: {state['cycle_count']} 次)", "info")
         except Exception as e:
             state['error'] = True
             state['error_msg'] = str(e)
@@ -1397,7 +1512,34 @@ def api_pickup():
 
     t = threading.Thread(target=stamping_cycle_sequence, daemon=True)
     t.start()
-    return jsonify({'ok': True, 'msg': '自動衝壓搬運循環啟動'})
+    return jsonify({'ok': True, 'msg': '自動衝壓搬運循環啟動', 'continuous_mode': state['continuous_mode']})
+
+@app.route('/api/continuous_mode', methods=['POST'])
+def api_continuous_mode():
+    """設定連續生產運轉模式與循環參數"""
+    data = request.get_json(silent=True) or {}
+    if 'enabled' in data:
+        state['continuous_mode'] = bool(data['enabled'])
+    if 'target' in data:
+        state['cycle_target'] = max(0, int(data['target']))
+    if 'interval' in data:
+        state['cycle_interval_sec'] = max(0.1, min(60.0, float(data['interval'])))
+    mode_text = '啟用連續生產模式' if state['continuous_mode'] else '關閉連續生產模式'
+    add_history(f"{mode_text} (目標={state['cycle_target']}次, 間隔={state['cycle_interval_sec']}s)", "info")
+    return jsonify({
+        'ok': True,
+        'continuous_mode': state['continuous_mode'],
+        'cycle_target': state['cycle_target'],
+        'cycle_interval_sec': state['cycle_interval_sec'],
+        'cycle_count': state['cycle_count']
+    })
+
+@app.route('/api/reset_cycle_count', methods=['POST'])
+def api_reset_cycle_count():
+    """重置生產次數計數器"""
+    state['cycle_count'] = 0
+    add_history("生產累計計數器已歸零", "info")
+    return jsonify({'ok': True, 'cycle_count': 0})
 
 @app.route('/api/set_limits', methods=['POST'])
 def api_set_limits():
@@ -2112,16 +2254,50 @@ def on_cmd_move(data):
             if y_stepper:
                 y_stepper.add_target_delta(delta, state['y_min'], state['y_max'])
 
+# ── 樹梅派硬體看門狗晶片守護 (BCM2835 Hardware Watchdog) ─────────
+watchdog_fd = None
+
+def init_hardware_watchdog():
+    """啟動樹梅派硬體看門狗 (/dev/watchdog) 心跳守護線程"""
+    global watchdog_fd
+    if not IS_RASPBERRY_PI:
+        return
+    try:
+        if os.path.exists('/dev/watchdog'):
+            watchdog_fd = open('/dev/watchdog', 'w')
+            state['watchdog_active'] = True
+            print("[WATCHDOG] 硬體看門狗 /dev/watchdog 啟動成功，心跳保護已就緒")
+
+            def _watchdog_feeder():
+                while True:
+                    try:
+                        if watchdog_fd and not watchdog_fd.closed:
+                            watchdog_fd.write('\0')
+                            watchdog_fd.flush()
+                    except Exception:
+                        pass
+                    time.sleep(3.0)
+
+            t = threading.Thread(target=_watchdog_feeder, daemon=True)
+            t.start()
+        else:
+            print("[WATCHDOG] 提示: 未檢測到 /dev/watchdog 節點 (需載入 bcm2835_wdt 模組)")
+    except Exception as e:
+        print(f"[WATCHDOG] 無法開啟硬體看門狗: {e}")
+
 # ── 主程式 ────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("=" * 60)
-    print("  樹梅派步進馬達控制系統 (已升級)")
+    print("  樹梅派步進馬達控制系統 (已升級連續運行機制)")
     print("  Raspberry Pi Stepper Motor Controller")
     print(f"  模式: {state['gpio_mode']}")
     print("=" * 60)
 
     # 初始化 GPIO
     init_gpio()
+
+    # 初始化硬體看門狗
+    init_hardware_watchdog()
 
     # 啟動廣播執行緒
     broadcast_thread = threading.Thread(target=broadcast_state, daemon=True)

@@ -4,9 +4,9 @@
 #  衝壓機自動化搬運系統 - 樹梅派步進馬達控制器一鍵安裝腳本
 #
 #  Usage (一行指令安裝):
-#    curl -fsSL https://raw.githubusercontent.com/Nono0325/Nice/main/servo_control/install.sh | sudo bash
+#    curl -fsSL https://raw.githubusercontent.com/Nono0325/Nice1/main/servo_control/install.sh | sudo bash
 #  or:
-#    wget -qO- https://raw.githubusercontent.com/Nono0325/Nice/main/servo_control/install.sh | sudo bash
+#    wget -qO- https://raw.githubusercontent.com/Nono0325/Nice1/main/servo_control/install.sh | sudo bash
 # ================================================================
 
 set -e  # 遇到錯誤立即中止
@@ -177,13 +177,20 @@ fi
 log_ok "檔案權限配置完成"
 
 # ── 設定 pigpio 與 systemd 開機自啟服務 ────────────────────────
-log_step "7/7 配置開機自動啟動服務 (systemd)"
+log_step "7/7 配置硬體看門狗與開機自動啟動服務 (systemd)"
 
 if [ "$IS_PI" = true ] && [ "$EUID" -eq 0 ]; then
     log_info "啟動並開機啟用 pigpio 守護進程..."
     systemctl enable pigpiod 2>/dev/null || true
     systemctl start pigpiod 2>/dev/null || true
     log_ok "pigpiod 守護服務已啟用"
+
+    # 配置樹梅派 BCM2835 硬體看門狗晶片模組
+    if ! grep -q "bcm2835_wdt" /etc/modules 2>/dev/null; then
+        echo "bcm2835_wdt" >> /etc/modules 2>/dev/null || true
+        modprobe bcm2835_wdt 2>/dev/null || true
+        log_ok "已啟用 bcm2835_wdt 硬體看門狗驅動模組"
+    fi
 fi
 
 if [ "$EUID" -eq 0 ]; then
@@ -193,7 +200,7 @@ if [ "$EUID" -eq 0 ]; then
     cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Raspberry Pi Stepper Motor Controller
-Documentation=https://github.com/Nono0325/Nice
+Documentation=https://github.com/Nono0325/Nice1
 After=network.target pigpiod.service
 Wants=network.target
 
@@ -204,6 +211,7 @@ WorkingDirectory=${INSTALL_DIR}
 ExecStart=${INSTALL_DIR}/venv/bin/python ${INSTALL_DIR}/servo_controller.py
 Restart=always
 RestartSec=3
+WatchdogSec=15
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=${SERVICE_NAME}

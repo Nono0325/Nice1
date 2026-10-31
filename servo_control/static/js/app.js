@@ -209,6 +209,67 @@ socket.on('pickup_step', (data) => {
   });
 });
 
+socket.on('cycle_update', (data) => {
+  if (data.cycle_count !== undefined) state.cycle_count = data.cycle_count;
+  if (data.cycle_target !== undefined) state.cycle_target = data.cycle_target;
+  if (data.continuous_mode !== undefined) state.continuous_mode = data.continuous_mode;
+  const countEl = document.getElementById('txtCycleCount');
+  if (countEl) countEl.textContent = state.cycle_count || 0;
+  updateContinuousUI();
+});
+
+function formatUptime(sec) {
+  if (!sec || sec < 0) return '0天 0時 0分';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (d > 0) return `${d}天 ${h}時 ${m}分`;
+  if (h > 0) return `${h}時 ${m}分 ${s}秒`;
+  return `${m}分 ${s}秒`;
+}
+
+function updateContinuousUI() {
+  const lbl = document.getElementById('lblContinuousMode');
+  const btn = document.getElementById('btnToggleContinuous');
+  if (lbl) {
+    lbl.textContent = state.continuous_mode ? '連續生產模式' : '單次循環模式';
+    lbl.style.color = state.continuous_mode ? 'var(--accent-green)' : 'var(--accent-cyan)';
+  }
+  if (btn) {
+    btn.textContent = state.continuous_mode ? '切換為單次模式' : '切換為連續模式';
+    btn.classList.toggle('btn-primary', !!state.continuous_mode);
+  }
+}
+
+async function toggleContinuousMode() {
+  const nextMode = !state.continuous_mode;
+  const target = parseInt(document.getElementById('inputCycleTarget')?.value || 0, 10);
+  const interval = parseFloat(document.getElementById('inputCycleInterval')?.value || 1.0);
+  const r = await apiPost('/api/continuous_mode', { enabled: nextMode, target, interval });
+  if (r.ok) {
+    state.continuous_mode = r.continuous_mode;
+    updateContinuousUI();
+    toast(`已切換為：${state.continuous_mode ? '連續生產模式' : '單次循環模式'}`, 'info');
+  }
+}
+
+async function updateContinuousParams() {
+  const target = parseInt(document.getElementById('inputCycleTarget')?.value || 0, 10);
+  const interval = parseFloat(document.getElementById('inputCycleInterval')?.value || 1.0);
+  await apiPost('/api/continuous_mode', { enabled: state.continuous_mode, target, interval });
+}
+
+async function resetCycleCount() {
+  const r = await apiPost('/api/reset_cycle_count');
+  if (r.ok) {
+    state.cycle_count = 0;
+    const countEl = document.getElementById('txtCycleCount');
+    if (countEl) countEl.textContent = '0';
+    toast('累計生產循環次數已歸零', 'info');
+  }
+}
+
 function setWsStatus(online) {
   const dot  = document.getElementById('wsStatusDot');
   const text = document.getElementById('wsStatusText');
@@ -227,9 +288,25 @@ function updateDiagWsTag(online) {
 function updateUI() {
   const s = state;
 
-  // 時鐘
+  // 時鐘與長週期監控指標 (Uptime / Watchdog)
   document.getElementById('systemTimestamp').textContent = s.timestamp || '--:--:--';
   document.getElementById('gpioModeText').textContent = s.gpio_mode || '-';
+
+  const uptimeEl = document.getElementById('txtUptime');
+  if (uptimeEl) uptimeEl.textContent = formatUptime(s.uptime_sec);
+
+  const wdtEl = document.getElementById('txtWatchdog');
+  if (wdtEl) {
+    wdtEl.textContent = s.watchdog_active ? 'WDT: 守護中' : 'WDT: 離線';
+    wdtEl.style.color = s.watchdog_active ? 'var(--accent-green)' : 'var(--text-dim)';
+  }
+
+  // 累計生產次數
+  const countEl = document.getElementById('txtCycleCount');
+  if (countEl && s.cycle_count !== undefined) {
+    countEl.textContent = s.cycle_count;
+  }
+  updateContinuousUI();
 
   // START / STOP 按鈕
   const btnStart = document.getElementById('btnStart');

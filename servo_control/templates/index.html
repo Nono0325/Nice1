@@ -53,6 +53,14 @@
       <span>🖥️</span>
       <span id="gpioModeText">-</span>
     </div>
+    <div class="status-badge" id="badgeUptime" title="系統連續運行時間 (365天穩定監控)">
+      <span>⏱️</span>
+      <span id="txtUptime">0天 0時 0分</span>
+    </div>
+    <div class="status-badge" id="badgeWatchdog" title="硬體看門狗晶片自動守護">
+      <span>🛡️</span>
+      <span id="txtWatchdog">WDT</span>
+    </div>
     <div class="time-display" id="clockDisplay">--:--:--</div>
     <div style="display:flex;gap:6px;margin-left:6px">
       <button class="btn btn-warning" id="btnGlobalLogout" onclick="siteLogout()" title="登出系統" style="padding:4px 10px;font-size:11px;display:none">🔒 登出</button>
@@ -323,13 +331,41 @@
 
         <div class="divider" style="width:1px;height:60px;margin:0 8px"></div>
 
-        <!-- 衝壓搬運自動循環 (14 步) -->
-        <button class="btn btn-success" style="padding:14px 28px;font-size:15px;font-weight:700" onclick="cmdPickup()" id="btnPickup">
-          🔄 衝壓搬運自動循環 (14 步 Cycle)
+        <!-- 衝壓搬運自動循環控制 (單次 / 連續) -->
+        <button class="btn btn-success" style="padding:14px 24px;font-size:15px;font-weight:700" onclick="cmdPickup()" id="btnPickup">
+          🔄 啟動衝壓搬運循環
         </button>
 
+        <!-- 連續運轉生產模式切換 -->
+        <div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.04);padding:8px 14px;border-radius:8px;border:1px solid var(--border)">
+          <div style="display:flex;flex-direction:column">
+            <span style="font-size:11px;color:var(--text-dim)">運作模式</span>
+            <span style="font-size:13px;font-weight:700;color:var(--accent-cyan)" id="lblContinuousMode">單次循環</span>
+          </div>
+          <button class="btn btn-secondary" id="btnToggleContinuous" onclick="toggleContinuousMode()" style="padding:6px 10px;font-size:12px">
+            切換為連續模式
+          </button>
+        </div>
+
+        <!-- 累計生產計數與目標生產量 -->
+        <div style="display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.04);padding:8px 14px;border-radius:8px;border:1px solid var(--border)">
+          <div style="display:flex;flex-direction:column">
+            <span style="font-size:11px;color:var(--text-dim)">累計完成循環</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:800;color:var(--accent-green)" id="txtCycleCount">0</span>
+          </div>
+          <div style="display:flex;flex-direction:column">
+            <span style="font-size:11px;color:var(--text-dim)">目標件數 (0=無限制)</span>
+            <input type="number" id="inputCycleTarget" min="0" value="0" style="width:70px;padding:3px 6px;font-size:12px;background:#030712;border:1px solid var(--border);border-radius:4px;color:#f8fafc" onchange="updateContinuousParams()">
+          </div>
+          <div style="display:flex;flex-direction:column">
+            <span style="font-size:11px;color:var(--text-dim)">循環間隔(s)</span>
+            <input type="number" id="inputCycleInterval" min="0.1" step="0.5" value="1.0" style="width:55px;padding:3px 6px;font-size:12px;background:#030712;border:1px solid var(--border);border-radius:4px;color:#f8fafc" onchange="updateContinuousParams()">
+          </div>
+          <button class="btn btn-danger" style="padding:4px 8px;font-size:11px" onclick="resetCycleCount()" title="重置生產計數器">清零</button>
+        </div>
+
         <!-- 全部歸零 -->
-        <button class="btn btn-warning" id="btnHomeAll" style="padding:14px 24px;font-size:14px" onclick="cmdHome('all')">
+        <button class="btn btn-warning" id="btnHomeAll" style="padding:14px 20px;font-size:13px" onclick="cmdHome('all')">
           🏠 全部歸零 (X-a / Z-d)
         </button>
         <span id="homingIndicator" style="display:none;font-size:13px;color:var(--accent-amber);animation:pulse 0.8s infinite alternate">⏳ 歸零中...</span>

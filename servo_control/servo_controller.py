@@ -14,7 +14,7 @@ Raspberry Pi Stepper Motor & Electromagnet Controller
    - e 點 (向下極限/取放深度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 23)
 3. 末端手臂:
    - 圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, Ø25×20mm, 經 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動 GPIO 24)
-   - 金屬吸附檢測霍爾感測器 (經 817 光耦電壓隔離板 / PC817 轉接模組輸入 GPIO 6，檢測是否確實吸起金屬工件)
+   - 末端金屬吸附檢測霍爾感測陣列：共 8 顆霍爾開關，兩個一組（共 4 組：G1[H1,H2]、G2[H3,H4]、G3[H5,H6]、G4[H7,H8]），經 8路 817 光耦電壓隔離板 (PC817 轉接模組) 輸入 GPIO 6, 7, 8, 9, 10, 11, 4, 21
 4. 模具衝壓交握:
    - 衝壓機衝壓完成回授訊號 (GPIO 5，817 光耦電壓隔離板輸入)
 """
@@ -87,10 +87,24 @@ PIN = {
     'LIM_UP':         22,
     'LIM_DOWN':       23,
 
-    # 手臂金屬檢測霍爾感測器 (搭配 817 光耦電壓隔離板 / PC817 電壓控制轉接模組 2/4/8路)
-    'HALL_ARM_METAL': 6,    # 手臂霍爾感測 (Pin 31 - IO6) 經 817 光耦隔離檢測工件是否被電磁鐵吸住
+    # 末端金屬檢測霍爾感測陣列：8 顆霍爾開關，兩個一組 (共 4 組，搭配 8路 817 光耦電壓隔離板 / PC817 轉接模組)
+    # 第 1 組 (Group 1)
+    'HALL_1':         6,    # G1-1: 手臂霍爾 #1 (Pin 31 - GPIO 6)
+    'HALL_2':         7,    # G1-2: 手臂霍爾 #2 (Pin 26 - GPIO 7)
+    # 第 2 組 (Group 2)
+    'HALL_3':         8,    # G2-1: 手臂霍爾 #3 (Pin 24 - GPIO 8)
+    'HALL_4':         9,    # G2-2: 手臂霍爾 #4 (Pin 21 - GPIO 9)
+    # 第 3 組 (Group 3)
+    'HALL_5':         10,   # G3-1: 手臂霍爾 #5 (Pin 19 - GPIO 10)
+    'HALL_6':         11,   # G3-2: 手臂霍爾 #6 (Pin 23 - GPIO 11)
+    # 第 4 組 (Group 4)
+    'HALL_7':         4,    # G4-1: 手臂霍爾 #7 (Pin 7  - GPIO 4)
+    'HALL_8':         21,   # G4-2: 手臂霍爾 #8 (Pin 40 - GPIO 21)
+    'HALL_ARM_METAL': 6,    # 向下相容主別名 (對應 HALL_1)
     'PRESS_DONE':     5,    # 衝壓模具衝壓完成回授訊號 (Pin 29 - IO5)
 }
+
+HALL_PIN_KEYS = ['HALL_1', 'HALL_2', 'HALL_3', 'HALL_4', 'HALL_5', 'HALL_6', 'HALL_7', 'HALL_8']
 
 # ── 步進馬達虛擬 PWM 規格 ──────────────────────────────────────────
 PWM_FREQ     = 50       
@@ -133,9 +147,19 @@ state = {
     'lim_x_c':        False,  # c 點: X 軸向右極限 (原 lim_right)
     'lim_z_d':        False,  # d 點: Z 軸向上歸零 (原 lim_up)
     'lim_z_e':        False,  # e 點: Z 軸向下極限 (原 lim_down)
-    # 手臂金屬檢測霍爾感測器
-    'hall_arm_metal': False,  # 手臂霍爾感測是否有金屬工件被吸
-    'press_done':     False,  # 模具衝壓完成訊號
+    # 末端金屬檢測霍爾感測陣列 (8 顆，兩個一組共 4 組)
+    'hall_1': False, 'hall_2': False,  # 第 1 組 (G1)
+    'hall_3': False, 'hall_4': False,  # 第 2 組 (G2)
+    'hall_5': False, 'hall_6': False,  # 第 3 組 (G3)
+    'hall_7': False, 'hall_8': False,  # 第 4 組 (G4)
+    'hall_group_1':   False,           # 第 1 組狀態 (H1 & H2)
+    'hall_group_2':   False,           # 第 2 組狀態 (H3 & H4)
+    'hall_group_3':   False,           # 第 3 組狀態 (H5 & H6)
+    'hall_group_4':   False,           # 第 4 組狀態 (H7 & H8)
+    'hall_active_count': 0,            # 觸發顆數 (0~8)
+    'hall_group_count':  0,            # 觸發組數 (0~4)
+    'hall_arm_metal': False,           # 綜合判定是否有金屬工件被吸住
+    'press_done':     False,           # 模具衝壓完成訊號
 
     # 舊有名稱相容鏡像
     'lim_left':  False,
@@ -389,9 +413,9 @@ def init_gpio():
     for pin_name in ['MAGNET', 'VACUUM']:
         GPIO.setup(PIN[pin_name], GPIO.OUT, initial=GPIO.LOW)
 
-    # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 + 手臂金屬霍爾感測器 + 衝壓完成訊號）
-    # NPN 常開開關在感應金屬時拉低至 GND，樹莓派端配置 PUD_UP 內部上拉，讀入為 LOW 時表示觸發
-    input_pins = ['LIM_X_A', 'LIM_X_B', 'LIM_X_C', 'LIM_Z_D', 'LIM_Z_E', 'HALL_ARM_METAL', 'PRESS_DONE']
+    # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 + 8顆手臂金屬霍爾感測器(兩個一組) + 衝壓完成訊號）
+    # NPN 常開開關與 817 光耦隔離板在感應金屬時輸出拉低至 GND，樹莓派端配置 PUD_UP 內部上拉，讀入為 LOW 時表示觸發
+    input_pins = ['LIM_X_A', 'LIM_X_B', 'LIM_X_C', 'LIM_Z_D', 'LIM_Z_E'] + HALL_PIN_KEYS + ['PRESS_DONE']
     for pin_name in input_pins:
         p = PIN[pin_name]
         GPIO.setup(p, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -453,18 +477,21 @@ def set_digital_output(name, value):
         state['arm_down'] = bool(value)
 
 def read_limit_switches():
-    """讀取所有電感式接近開關 (QN-1805-E1 方形 DC10-30V 三線 NPN 常開) 與 手臂霍爾感測器 (具備 3-Sample 工業數位防彈跳濾波)"""
+    """讀取所有電感式接近開關 (QN-1805-E1) 與 8 顆末端金屬霍爾感測器 (兩個一組共 4 組，具備 3-Sample 工業數位防彈跳濾波)"""
     global x_stepper, z_stepper, y_stepper
     if IS_RASPBERRY_PI:
         # 工業抗干擾數位濾波 (Digital Debounce Filter)：連續 3 次取樣確認低電位，過濾衝壓電氣火花雜訊
         pins = [
             PIN['LIM_X_A'], PIN['LIM_X_B'], PIN['LIM_X_C'],
-            PIN['LIM_Z_D'], PIN['LIM_Z_E'], PIN['HALL_ARM_METAL'], PIN['PRESS_DONE']
+            PIN['LIM_Z_D'], PIN['LIM_Z_E'],
+            PIN['HALL_1'], PIN['HALL_2'], PIN['HALL_3'], PIN['HALL_4'],
+            PIN['HALL_5'], PIN['HALL_6'], PIN['HALL_7'], PIN['HALL_8'],
+            PIN['PRESS_DONE']
         ]
         readings = [0] * len(pins)
         for _ in range(3):
             for i, p in enumerate(pins):
-                if not GPIO.input(p): # NPN 常開開關感應金屬時輸出接通 GND(0V)，低電位觸發
+                if not GPIO.input(p): # NPN 常開開關 / 817 光耦感應金屬時輸出接通 GND(0V)，低電位觸發
                     readings[i] += 1
             time.sleep(0.001)
 
@@ -473,8 +500,9 @@ def read_limit_switches():
         state['lim_x_c'] = readings[2] == 3
         state['lim_z_d'] = readings[3] == 3
         state['lim_z_e'] = readings[4] == 3
-        state['hall_arm_metal'] = readings[5] == 3
-        state['press_done'] = readings[6] == 3
+        for idx in range(8):
+            state[f'hall_{idx+1}'] = readings[5 + idx] == 3
+        state['press_done'] = readings[13] == 3
     else:
         # 模擬模式：根據步進馬達當前位置計算感測器觸發
         if x_stepper:
@@ -488,8 +516,20 @@ def read_limit_switches():
             z_max = state.get('z_max', state['y_max'])
             state['lim_z_e'] = st_z.current_pos <= z_min + 5
             state['lim_z_d'] = st_z.current_pos >= z_max - 5
-        state['hall_arm_metal'] = state.get('magnet', False) # 磁鐵吸附時模擬感測到金屬
+        mag_active = state.get('magnet', False) # 磁鐵吸附時模擬 8 顆霍爾(4組)感測到金屬
+        for idx in range(1, 9):
+            state[f'hall_{idx}'] = mag_active
         state['press_done'] = True
+
+    # 計算 8 顆霍爾開關「兩個一組」(共 4 組) 狀態：同組兩顆皆觸發 (或組內觸發)
+    state['hall_group_1'] = bool(state['hall_1'] and state['hall_2'])
+    state['hall_group_2'] = bool(state['hall_3'] and state['hall_4'])
+    state['hall_group_3'] = bool(state['hall_5'] and state['hall_6'])
+    state['hall_group_4'] = bool(state['hall_7'] and state['hall_8'])
+    state['hall_active_count'] = sum(1 for i in range(1, 9) if state.get(f'hall_{i}'))
+    state['hall_group_count']  = sum(1 for g in range(1, 5) if state.get(f'hall_group_{g}'))
+    # 當任一組完整觸發 (或有霍爾感應到金屬) 時，判定金屬在位
+    state['hall_arm_metal'] = bool(state['hall_group_count'] > 0 or state['hall_active_count'] > 0)
 
     # 同步舊有名稱鏡像
     state['lim_left'] = state['lim_x_a']
@@ -1376,18 +1416,18 @@ def api_pickup():
                     st_z.set_position(pos_z_d)
                 time.sleep(0.2)
 
-                # 步驟 5: 手臂霍爾感測金屬是否存在 (安全防呆檢查)
+                # 步驟 5: 末端 8 顆霍爾感測陣列 (兩個一組共 4 組) 檢測金屬是否存在 (安全防呆檢查)
                 if not state['system_run']: break
-                socketio.emit('pickup_step', {'step': 'check-suck', 'desc': '5. 霍爾感測金屬檢測'})
-                add_history("步驟 5/14: 讀取手臂霍爾感測器，驗證金屬是否存在...", "info")
+                socketio.emit('pickup_step', {'step': 'check-suck', 'desc': '5. 8顆霍爾(4組)金屬檢測'})
+                add_history("步驟 5/14: 讀取末端 8 顆霍爾感測陣列 (4 組雙重確認)，驗證金屬是否吸附...", "info")
                 read_limit_switches()
                 if not state.get('hall_arm_metal'):
-                    add_history("❌ 警報：手臂霍爾未檢測到金屬工件！取料失敗，緊急中斷！", "error")
+                    add_history("❌ 警報：末端 8 顆霍爾感測器 (G1~G4) 皆未檢測到金屬工件！取料失敗，緊急中斷！", "error")
                     set_digital_output('magnet', False)
                     state['error'] = True
-                    state['error_msg'] = "手臂霍爾未檢測到金屬工件，自動循環中止"
+                    state['error_msg'] = "末端霍爾感測陣列 (8顆/4組) 未檢測到金屬工件，自動循環中止"
                     return
-                add_history("✔ 霍爾感測確認：金屬工件吸附正常！", "success")
+                add_history(f"✔ 霍爾感測確認：金屬工件吸附正常 ({state.get('hall_active_count', 8)}/8 顆觸發，{state.get('hall_group_count', 4)}/4 組就緒)！", "success")
                 time.sleep(0.2)
 
                 # 步驟 6: X 軸到 c 點 (向右極限/放料點)
@@ -1752,8 +1792,17 @@ def api_diagnose():
             'Z_E': {'pin': PIN['LIM_Z_E'], 'name': 'Z軸e點(向下極限)', 'triggered': state.get('lim_z_e')},
         },
         'hall_sensors': {
-            'optocoupler': '817 光耦電壓隔離板 (PC817 電壓控制轉接模組)',
-            'ARM_METAL': {'pin': PIN['HALL_ARM_METAL'], 'name': '手臂金屬檢測霍爾 (817光耦隔離)', 'triggered': state.get('hall_arm_metal')},
+            'optocoupler': '8路 817 光耦電壓隔離板 (PC817 電壓控制轉接模組)',
+            'layout': '8 顆霍爾開關，兩個一組 (共 4 組)',
+            'active_count': state.get('hall_active_count', 0),
+            'group_count': state.get('hall_group_count', 0),
+            'groups': {
+                'G1': {'name': '第1組 (H1+H2)', 'pins': [PIN['HALL_1'], PIN['HALL_2']], 'h1': state.get('hall_1'), 'h2': state.get('hall_2'), 'triggered': state.get('hall_group_1')},
+                'G2': {'name': '第2組 (H3+H4)', 'pins': [PIN['HALL_3'], PIN['HALL_4']], 'h3': state.get('hall_3'), 'h4': state.get('hall_4'), 'triggered': state.get('hall_group_2')},
+                'G3': {'name': '第3組 (H5+H6)', 'pins': [PIN['HALL_5'], PIN['HALL_6']], 'h5': state.get('hall_5'), 'h6': state.get('hall_6'), 'triggered': state.get('hall_group_3')},
+                'G4': {'name': '第4組 (H7+H8)', 'pins': [PIN['HALL_7'], PIN['HALL_8']], 'h7': state.get('hall_7'), 'h8': state.get('hall_8'), 'triggered': state.get('hall_group_4')},
+            },
+            'ARM_METAL': {'pin': PIN['HALL_ARM_METAL'], 'name': '手臂金屬檢測總狀態 (8顆/4組)', 'triggered': state.get('hall_arm_metal')},
         },
         'limit_switches': {
             'LEFT':  {'pin': PIN['LIM_LEFT'],  'triggered': state['lim_left']},

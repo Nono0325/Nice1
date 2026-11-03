@@ -151,11 +151,27 @@
         </div>
         <div class="indicator-group">
           <div class="indicator-label">電磁鐵吸盤</div>
-          <div class="indicator-lamp off" id="lamp-vacuum" title="LSD-P25/20 圓形強力電磁鐵 (8KG)"></div>
+          <div class="indicator-lamp off" id="lamp-vacuum" title="LSD-P25/20 圓形強力電磁鐵 (8KG) + JQC-3FF-S-Z 繼電器"></div>
         </div>
         <div class="indicator-group">
-          <div class="indicator-label">手臂金屬霍爾</div>
-          <div class="indicator-lamp off" id="lamp-metal"></div>
+          <div class="indicator-label">金屬總檢(8顆)</div>
+          <div class="indicator-lamp off" id="lamp-metal" title="末端霍爾金屬檢測總狀態 (8顆/4組)"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">霍爾 G1(H1/2)</div>
+          <div class="indicator-lamp off" id="lamp-hall-g1" title="第1組霍爾開關 (H1:GPIO6 + H2:GPIO7，817光耦隔離)"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">霍爾 G2(H3/4)</div>
+          <div class="indicator-lamp off" id="lamp-hall-g2" title="第2組霍爾開關 (H3:GPIO8 + H4:GPIO9，817光耦隔離)"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">霍爾 G3(H5/6)</div>
+          <div class="indicator-lamp off" id="lamp-hall-g3" title="第3組霍爾開關 (H5:GPIO10 + H6:GPIO11，817光耦隔離)"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">霍爾 G4(H7/8)</div>
+          <div class="indicator-lamp off" id="lamp-hall-g4" title="第4組霍爾開關 (H7:GPIO4 + H8:GPIO21，817光耦隔離)"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">X-a(歸零)</div>
@@ -456,7 +472,7 @@
           <thead><tr><th>裝置 / 信號</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
             <tr><td>圓形電磁鐵 LSD-P25/20 (經 JQC-3FF-S-Z 光耦繼電器驅動)</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
-            <tr><td>手臂金屬檢測霍爾開關 (經 817 光耦電壓隔離板轉接)</td><td>GPIO 6</td><td><span class="tag" id="mon-metal">未吸附</span></td></tr>
+            <tr><td>末端金屬霍爾總狀態 (8顆 / 兩個一組共4組 / 817光耦)</td><td>8路輸入</td><td><span class="tag" id="mon-metal">未吸附 (0/8)</span></td></tr>
             <tr><td>衝壓模具完成回授 (PRESS_DONE / 817 光耦隔離)</td><td>GPIO 5</td><td><span class="tag" id="mon-press">就緒</span></td></tr>
           </tbody>
         </table>
@@ -474,6 +490,52 @@
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- 末端金屬檢測霍爾感測陣列 (8顆 / 兩個一組共4組) -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title"><span class="icon">🧲</span>末端金屬檢測霍爾陣列（8 顆 / 兩個一組共 4 組，搭配 8路 817 光耦電壓隔離板）</div>
+      <table class="diag-table">
+        <thead>
+          <tr>
+            <th>分組 (兩個一組)</th>
+            <th>感測器 A (GPIO)</th>
+            <th>感測器 B (GPIO)</th>
+            <th>單顆狀態 (A / B)</th>
+            <th>分組判定狀態</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>第 1 組 (Group 1)</strong></td>
+            <td>HALL_1 (GPIO 6 / Pin 31)</td>
+            <td>HALL_2 (GPIO 7 / Pin 26)</td>
+            <td><span class="tag" id="mon-hall-1">H1: OFF</span> &nbsp; <span class="tag" id="mon-hall-2">H2: OFF</span></td>
+            <td><span class="tag" id="mon-hall-g1">⚪ 未觸發</span></td>
+          </tr>
+          <tr>
+            <td><strong>第 2 組 (Group 2)</strong></td>
+            <td>HALL_3 (GPIO 8 / Pin 24)</td>
+            <td>HALL_4 (GPIO 9 / Pin 21)</td>
+            <td><span class="tag" id="mon-hall-3">H3: OFF</span> &nbsp; <span class="tag" id="mon-hall-4">H4: OFF</span></td>
+            <td><span class="tag" id="mon-hall-g2">⚪ 未觸發</span></td>
+          </tr>
+          <tr>
+            <td><strong>第 3 組 (Group 3)</strong></td>
+            <td>HALL_5 (GPIO 10 / Pin 19)</td>
+            <td>HALL_6 (GPIO 11 / Pin 23)</td>
+            <td><span class="tag" id="mon-hall-5">H5: OFF</span> &nbsp; <span class="tag" id="mon-hall-6">H6: OFF</span></td>
+            <td><span class="tag" id="mon-hall-g3">⚪ 未觸發</span></td>
+          </tr>
+          <tr>
+            <td><strong>第 4 組 (Group 4)</strong></td>
+            <td>HALL_7 (GPIO 4 / Pin 7)</td>
+            <td>HALL_8 (GPIO 21 / Pin 40)</td>
+            <td><span class="tag" id="mon-hall-7">H7: OFF</span> &nbsp; <span class="tag" id="mon-hall-8">H8: OFF</span></td>
+            <td><span class="tag" id="mon-hall-g4">⚪ 未觸發</span></td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- 系統日誌 -->
@@ -849,8 +911,11 @@
         <div class="pin-item"><span class="pin-number">GPIO 19</span><span class="pin-name">Z_DIR 步進方向 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 26</span><span class="pin-name">Z_ENA 步進致能 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET 電磁鐵 (LSD-P25/20 + JQC-3FF-S-Z 繼電器)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 6</span><span class="pin-name">手臂金屬霍爾開關 (817 光耦電壓隔離板 DI)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 5</span><span class="pin-name">衝壓機完成訊號 (PRESS_DONE)</span><div class="pin-dot" style="background:var(--accent-cyan)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 6 / 7</span><span class="pin-name">末端霍爾第1組 G1 (HALL_1 + HALL_2, 817光耦)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 8 / 9</span><span class="pin-name">末端霍爾第2組 G2 (HALL_3 + HALL_4, 817光耦)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 10 / 11</span><span class="pin-name">末端霍爾第3組 G3 (HALL_5 + HALL_6, 817光耦)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 4 / 21</span><span class="pin-name">末端霍爾第4組 G4 (HALL_7 + HALL_8, 817光耦)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 5</span><span class="pin-name">衝壓機完成訊號 (PRESS_DONE, 817光耦)</span><div class="pin-dot" style="background:var(--accent-cyan)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 17</span><span class="pin-name">X-a點 歸零接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 25</span><span class="pin-name">X-b點 中間模具接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 27</span><span class="pin-name">X-c點 右極限接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
@@ -940,9 +1005,9 @@
           <table class="diag-table">
             <tbody>
               <tr><td>GPIO 模式</td><td><span class="tag" id="diag-gpio-mode">-</span></td></tr>
-              <tr><td>伺服馬達數量</td><td><span class="tag tag-blue">3 顆 (X + Y1 + Y2)</span></td></tr>
-              <tr><td>數位輸出</td><td><span class="tag tag-amber">2 路 (VAC + Z)</span></td></tr>
-              <tr><td>限位開關</td><td><span class="tag tag-red">4 路</span></td></tr>
+              <tr><td>步進馬達軸數</td><td><span class="tag tag-blue">雙軸 (X 軸 + Z 軸)</span></td></tr>
+              <tr><td>末端霍爾開關</td><td><span class="tag tag-purple">8 顆 (2個一組 × 4組 / 817光耦)</span></td></tr>
+              <tr><td>電感接近開關</td><td><span class="tag tag-red">5 路 (QN-1805-E1)</span></td></tr>
             </tbody>
           </table>
         </div>

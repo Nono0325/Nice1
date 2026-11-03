@@ -15,6 +15,10 @@ let state = {
   system_run: false, arm_down: false,
   pickup_active: false, error: false, error_msg: '',
   lim_x_a: false, lim_x_b: false, lim_x_c: false, lim_z_d: false, lim_z_e: false,
+  hall_1: false, hall_2: false, hall_3: false, hall_4: false,
+  hall_5: false, hall_6: false, hall_7: false, hall_8: false,
+  hall_group_1: false, hall_group_2: false, hall_group_3: false, hall_group_4: false,
+  hall_active_count: 0, hall_group_count: 0,
   hall_arm_metal: false, press_done: false,
   lim_left: false, lim_mid: false, lim_right: false, lim_up: false, lim_down: false, hall_metal: false,
   x_min: 500, x_max: 2500, z_min: 500, z_max: 2500, y_min: 500, y_max: 2500,
@@ -327,6 +331,10 @@ function updateUI() {
   setLamp('lamp-armdown',  s.arm_down      ? 'amber' : 'off');
   setLamp('lamp-vacuum',   (s.magnet || s.vacuum) ? 'amber' : 'off');
   setLamp('lamp-metal',    (s.hall_arm_metal || s.hall_metal) ? 'green' : 'off');
+  setLamp('lamp-hall-g1',  s.hall_group_1 ? 'green' : ((s.hall_1 || s.hall_2) ? 'amber' : 'off'));
+  setLamp('lamp-hall-g2',  s.hall_group_2 ? 'green' : ((s.hall_3 || s.hall_4) ? 'amber' : 'off'));
+  setLamp('lamp-hall-g3',  s.hall_group_3 ? 'green' : ((s.hall_5 || s.hall_6) ? 'amber' : 'off'));
+  setLamp('lamp-hall-g4',  s.hall_group_4 ? 'green' : ((s.hall_7 || s.hall_8) ? 'amber' : 'off'));
   setLamp('lamp-limleft',  (s.lim_x_a || s.lim_left)  ? 'red' : 'off');
   setLamp('lamp-limmid',   (s.lim_x_b || s.lim_mid)   ? 'red' : 'off');
   setLamp('lamp-limright', (s.lim_x_c || s.lim_right) ? 'red' : 'off');
@@ -404,9 +412,32 @@ function updateUI() {
   setEl('gaugeY1Val', el => el.textContent = `${zPulse} µs`);
   setEl('gaugeY2Val', el => el.textContent = `${zPulse} µs`);
 
-  // 監控 Tab - 數位 I/O 與 QN-1805-E1 接近開關
+  // 監控 Tab - 數位 I/O 與 QN-1805-E1 接近開關 & 8顆末端霍爾(兩個一組共4組)
+  const hActCnt = s.hall_active_count !== undefined ? s.hall_active_count : ((s.hall_arm_metal || s.hall_metal) ? 8 : 0);
+  const hGrpCnt = s.hall_group_count !== undefined ? s.hall_group_count : ((s.hall_arm_metal || s.hall_metal) ? 4 : 0);
   updateTag('mon-vacuum', (s.magnet || s.vacuum), '🟢 通電 ON', '⚫ 斷電 OFF', 'tag-green', 'tag-red');
-  updateTag('mon-metal', (s.hall_arm_metal || s.hall_metal), '🟢 已吸附金屬', '⚪ 未吸附', 'tag-green', 'tag-blue');
+  updateTag('mon-metal', (s.hall_arm_metal || s.hall_metal), `🟢 已吸附 (${hActCnt}/8顆 · ${hGrpCnt}/4組)`, '⚪ 未吸附 (0/8顆)', 'tag-green', 'tag-blue');
+  for (let i = 1; i <= 8; i++) {
+    updateTag(`mon-hall-${i}`, !!s[`hall_${i}`], `H${i}: 🟢 觸發`, `H${i}: ⚪ OFF`, 'tag-green', 'tag-blue');
+  }
+  for (let g = 1; g <= 4; g++) {
+    const hA = !!s[`hall_${g * 2 - 1}`];
+    const hB = !!s[`hall_${g * 2}`];
+    const gFull = !!s[`hall_group_${g}`];
+    const gEl = document.getElementById(`mon-hall-g${g}`);
+    if (gEl) {
+      if (gFull) {
+        gEl.className = 'tag tag-green';
+        gEl.textContent = '🟢 雙顆觸發 (2/2)';
+      } else if (hA || hB) {
+        gEl.className = 'tag tag-amber';
+        gEl.textContent = '🟡 單顆觸發 (1/2)';
+      } else {
+        gEl.className = 'tag tag-blue';
+        gEl.textContent = '⚪ 未觸發 (0/2)';
+      }
+    }
+  }
   updateTag('mon-press', (s.press_done !== undefined ? s.press_done : true), '🟢 完成', '⏳ 等待中', 'tag-green', 'tag-amber');
   updateTag('mon-limleft',  (s.lim_x_a || s.lim_left),  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
   updateTag('mon-limmid',   (s.lim_x_b || s.lim_mid),   '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');

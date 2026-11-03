@@ -86,7 +86,7 @@
     🔬 馬達診斷
   </button>
   <button class="tab-btn" onclick="switchTab('macros')" id="tab-macros">
-    🤖 動作巨集
+    🧩 積木程式 / 巨集
   </button>
   <button class="tab-btn" onclick="switchTab('gcode')" id="tab-gcode">
     📁 G-code 預覽
@@ -407,7 +407,10 @@
 
     <!-- 14 步自動衝壓工作流程圖 -->
     <div class="card" id="flowchartCard" style="margin-top:16px">
-      <div class="card-title"><span><span class="icon">📋</span>衝壓機 14 步自動循環搬運流程 (Motion Pattern)</span></div>
+      <div class="card-title" style="justify-content:space-between">
+        <span><span class="icon">📋</span>衝壓機 14 步自動循環搬運流程 (Motion Pattern)</span>
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:12px" onclick="switchTab('macros')">🧩 開啟積木式移動編程</button>
+      </div>
       <div class="flowchart-container" style="flex-wrap:wrap;gap:8px;line-height:2">
         <div class="flow-step" id="step-home1">1. X回a點</div>
         <div class="flow-arrow">➡</div>
@@ -1036,47 +1039,152 @@
   </div>
 
   <!-- ═══════════════════════════════════════════
-       TAB 6: 動作巨集編輯器
+       TAB 6: 積木式移動程式工作坊 (Visual Block Programming & Macro Studio)
   ═══════════════════════════════════════════ -->
   <div class="tab-content fade-in" id="tab-content-macros">
-    <div class="grid-2">
-      <!-- 巨集列表與管理 -->
-      <div class="card">
-        <div class="card-title"><span class="icon">📂</span>巨集腳本管理</div>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div>
-            <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">選擇巨集腳本</label>
-            <select id="macroSelect" onchange="onMacroSelect(this.value)" style="width:100%;padding:8px;border-radius:6px;background:var(--bg-dark);color:var(--text-main);border:1px solid var(--border)">
-              <!-- 動態載入 -->
-            </select>
+    <!-- 頂部：專案管理、範本載入與執行控制列 -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px">
+        <!-- 左：選擇與新增腳本 -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:15px;font-weight:700;color:var(--accent-cyan)">🧩 移動程式：</span>
+          <select id="macroSelect" onchange="onMacroSelect(this.value)" style="min-width:210px;padding:8px 12px;border-radius:6px;background:var(--bg-dark);color:var(--text-main);border:1px solid var(--border)">
+            <!-- 動態載入 -->
+          </select>
+          <input type="text" id="newMacroName" placeholder="輸入新程式名稱..." style="width:160px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-dark);color:var(--text-main);font-size:13px">
+          <button class="btn btn-primary" style="padding:8px 14px;font-size:13px" onclick="createMacro()">➕ 新增</button>
+          <button class="btn btn-success" style="padding:8px 14px;font-size:13px" onclick="saveCurrentMacro()">💾 儲存程式</button>
+          <button class="btn btn-danger" style="padding:8px 12px;font-size:13px" onclick="deleteMacro()">🗑️ 刪除</button>
+        </div>
+
+        <!-- 右：即時執行與狀態 -->
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:6px 14px;display:flex;gap:14px;align-items:center;font-size:12px">
+            <span>狀態: <strong id="macroStatusText" style="color:var(--accent-cyan)">IDLE</strong></span>
+            <span>執行積木: <strong id="macroCurrentLine" style="color:var(--accent-green);font-family:'JetBrains Mono'">0</strong></span>
+            <span style="color:var(--text-dim)">|</span>
+            <span>目前座標: <strong id="blockLiveCoordText" style="color:var(--accent-amber);font-family:'JetBrains Mono'">X: 100.0mm / Z: 100.0mm</strong></span>
           </div>
-          <div style="display:flex;gap:8px">
-            <input type="text" id="newMacroName" placeholder="新巨集名稱..." style="flex:1;padding:6px 10px;border-radius:4px;border:1px solid var(--border);background:var(--bg-dark);color:var(--text-main)">
-            <button class="btn btn-success" onclick="createMacro()">➕ 新增</button>
-            <button class="btn btn-danger" onclick="deleteMacro()">🗑️ 刪除</button>
-          </div>
-          <div class="divider"></div>
-          <div class="card-title"><span class="icon">⚡</span>巨集執行控制</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-success" id="btnRunMacro" onclick="runMacro()" style="padding:10px 20px">▶ 執行巨集</button>
-            <button class="btn btn-amber" id="btnPauseMacro" onclick="pauseMacro()" style="padding:10px 20px" disabled>⏸ 暫停</button>
-            <button class="btn btn-danger" id="btnStopMacro" onclick="stopMacro()" style="padding:10px 20px" disabled>⏹ 停止</button>
-          </div>
-          <div style="margin-top:12px;background:#0d1117;border-radius:6px;padding:12px">
-            <div style="font-size:12px;color:var(--text-dim)">執行狀態：<span id="macroStatusText" style="color:var(--accent-cyan);font-weight:bold">IDLE</span></div>
-            <div style="font-size:12px;color:var(--text-dim);margin-top:4px">目前執行行數：<span id="macroCurrentLine" style="color:var(--accent-green);font-family:'JetBrains Mono'">0</span></div>
-          </div>
+          <button class="btn btn-success" id="btnRunMacro" onclick="runBlockProgram()" style="padding:10px 20px;font-size:14px;font-weight:700">▶ 執行積木程式</button>
+          <button class="btn btn-warning" id="btnPauseMacro" onclick="pauseMacro()" style="padding:10px 16px;font-size:14px" disabled>⏸ 暫停</button>
+          <button class="btn btn-danger" id="btnStopMacro" onclick="stopMacro()" style="padding:10px 16px;font-size:14px" disabled>⏹ 停止</button>
         </div>
       </div>
-      <!-- 巨集編輯器 -->
-      <div class="card">
-        <div class="card-title" style="justify-content:space-between">
-          <span><span class="icon">📝</span>巨集編輯器</span>
-          <button class="btn btn-primary" onclick="saveCurrentMacro()">💾 儲存腳本</button>
+
+      <!-- 快捷範本與工具列 -->
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text-dim);font-weight:600">⚡ 快速範本積木組：</span>
+          <button class="step-chip" onclick="loadBlockPreset('stamping14')" style="color:var(--accent-cyan)">🏭 14步衝壓自動搬運</button>
+          <button class="step-chip" onclick="loadBlockPreset('magnet4_group')" style="color:var(--accent-amber)">🧲 4組電磁鐵分組取放 (M1~M4)</button>
+          <button class="step-chip" onclick="loadBlockPreset('loop_patrol')" style="color:var(--accent-green)">🔁 3次重複往復取放迴圈</button>
         </div>
-        <textarea id="macroEditor" style="width:100%;height:320px;background:#060a10;color:#10b981;font-family:'JetBrains Mono',monospace;font-size:13px;padding:12px;border:1px solid var(--border);border-radius:8px;resize:none" placeholder="# 輸入動作指令...&#10;MOVE X 1500&#10;DELAY 500&#10;VACUUM ON"></textarea>
-        <div style="margin-top:8px;font-size:11px;color:var(--text-dim)">
-          支援指令：MOVE X/Y/Y1/Y2 [us] | DELAY [ms] | VACUUM ON/OFF | ARM UP/DOWN | HOME [axis] | MSG [text]
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:var(--text-dim)">積木總數: <strong id="blockTotalCount" style="color:var(--accent-cyan)">0</strong> 塊</span>
+          <button class="step-chip" onclick="clearAllBlocks()" style="color:var(--accent-red);border-color:rgba(239,68,68,0.4)">🧹 清空畫布</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主工作區：左(積木工具箱) + 中(積木拼圖畫布) + 右(雙向同步代碼) -->
+    <div class="block-studio-layout">
+      <!-- 1. 左側：積木工具箱 (點擊或拖曳加入) -->
+      <div class="card" style="padding:16px">
+        <div class="card-title" style="margin-bottom:10px"><span class="icon">🧰</span>積木工具箱 <span style="font-size:11px;color:var(--text-dim);font-weight:400;margin-left:auto">點擊或拖曳加入</span></div>
+
+        <!-- 分類 A: 運動與定位 -->
+        <div class="block-palette-group">
+          <div class="block-palette-title" style="color:#38bdf8">🟦 運動與座標定位 (Motion)</div>
+          <button class="palette-block-btn btype-point" draggable="true" ondragstart="onPaletteDragStart(event, 'GOTO')" onclick="addBlockByType('GOTO')">
+            <span>📍 移動到工位點 (a/b/c/d/e)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-motion" draggable="true" ondragstart="onPaletteDragStart(event, 'MOVE_MM')" onclick="addBlockByType('MOVE_MM')">
+            <span>📏 移動軸到絕對座標 (mm)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-motion" draggable="true" ondragstart="onPaletteDragStart(event, 'STEP')" onclick="addBlockByType('STEP')">
+            <span>👣 相對寸動移動 (±mm)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-point" draggable="true" ondragstart="onPaletteDragStart(event, 'HOME')" onclick="addBlockByType('HOME')">
+            <span>🏠 原點平穩歸零 (Homing)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-motion" draggable="true" ondragstart="onPaletteDragStart(event, 'MOVE')" onclick="addBlockByType('MOVE')">
+            <span>⚡ 移動軸到脈衝位置 (µs)</span><span>＋</span>
+          </button>
+        </div>
+
+        <!-- 分類 B: 4組電磁鐵控制 -->
+        <div class="block-palette-group">
+          <div class="block-palette-title" style="color:#fbbf24">🟨 電磁鐵吸盤控制 (M1~M4)</div>
+          <button class="palette-block-btn btype-magnet" draggable="true" ondragstart="onPaletteDragStart(event, 'MAGNET_ALL')" onclick="addBlockByType('MAGNET_ALL')">
+            <span>🧲 全部4組電磁鐵 (全開/全關)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-magnet" draggable="true" ondragstart="onPaletteDragStart(event, 'MAGNET_GROUP')" onclick="addBlockByType('MAGNET_GROUP')">
+            <span>🧲 單組電磁鐵控制 (M1~M4)</span><span>＋</span>
+          </button>
+        </div>
+
+        <!-- 分類 C: 感測器防呆與等待 -->
+        <div class="block-palette-group">
+          <div class="block-palette-title" style="color:#a78bfa">🟪 感測器防呆與等待 (Sensors)</div>
+          <button class="palette-block-btn btype-wait" draggable="true" ondragstart="onPaletteDragStart(event, 'DELAY')" onclick="addBlockByType('DELAY')">
+            <span>⏱️ 延遲等待時間 (ms)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-sensor" draggable="true" ondragstart="onPaletteDragStart(event, 'CHECK_METAL')" onclick="addBlockByType('CHECK_METAL')">
+            <span>🛡️ 檢查8顆霍爾金屬總檢</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-sensor" draggable="true" ondragstart="onPaletteDragStart(event, 'CHECK_GROUP')" onclick="addBlockByType('CHECK_GROUP')">
+            <span>🔍 檢查指定組別霍爾 (G1~G4)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-wait" draggable="true" ondragstart="onPaletteDragStart(event, 'WAIT_PRESS')" onclick="addBlockByType('WAIT_PRESS')">
+            <span>⏳ 等待衝壓模具完成訊號</span><span>＋</span>
+          </button>
+        </div>
+
+        <!-- 分類 D: 迴圈與邏輯 -->
+        <div class="block-palette-group" style="margin-bottom:0">
+          <div class="block-palette-title" style="color:#34d399">🟩 邏輯迴圈與訊息 (Flow)</div>
+          <button class="palette-block-btn btype-loop" draggable="true" ondragstart="onPaletteDragStart(event, 'REPEAT_PAIR')" onclick="addBlockByType('REPEAT_PAIR')">
+            <span>🔁 重複執行 N 次 (含結束積木)</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-msg" draggable="true" ondragstart="onPaletteDragStart(event, 'MSG')" onclick="addBlockByType('MSG')">
+            <span>💬 發送畫面通知訊息</span><span>＋</span>
+          </button>
+          <button class="palette-block-btn btype-comment" draggable="true" ondragstart="onPaletteDragStart(event, 'COMMENT')" onclick="addBlockByType('COMMENT')">
+            <span>📝 插入步驟註解說明</span><span>＋</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. 中間：積木拼圖畫布 (Block Workspace) -->
+      <div class="card" style="padding:16px">
+        <div class="card-title" style="justify-content:space-between;margin-bottom:10px">
+          <span><span class="icon">🧩</span>積木程式拼圖畫布 (可拖曳排序 / 點擊 📍 教導當前座標)</span>
+          <button class="btn" style="padding:4px 10px;font-size:11px" onclick="teachAddCurrentPosBlock()" title="直接把機台目前的 X 與 Z 座標新增為兩個移動積木">📍 一鍵教導記錄當前 X/Z 點位</button>
+        </div>
+
+        <div id="blockWorkspaceCanvas" class="block-workspace-canvas"
+             ondragover="onWorkspaceDragOver(event)"
+             ondrop="onWorkspaceDrop(event)">
+          <!-- 由 JS 動態渲染積木 -->
+        </div>
+      </div>
+
+      <!-- 3. 右側：雙向同步指令腳本 (Code Editor) -->
+      <div class="card" style="padding:16px">
+        <div class="card-title" style="justify-content:space-between;margin-bottom:10px">
+          <span><span class="icon">📝</span>指令腳本 (雙向同步)</span>
+          <button class="btn" style="padding:4px 10px;font-size:11px" onclick="syncTextToBlocks()">🔄 文字轉積木</button>
+        </div>
+        <textarea id="macroEditor" oninput="onMacroTextManualInput()" style="width:100%;height:460px;background:#060a10;color:#10b981;font-family:'JetBrains Mono',monospace;font-size:12px;padding:12px;border:1px solid var(--border);border-radius:8px;resize:vertical;box-sizing:border-box" placeholder="# 積木將自動轉譯為指令..."></textarea>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-dim);line-height:1.5">
+          <div>💡 <strong>支援指令語法</strong>：</div>
+          <div>• <code>GOTO X_A|X_B|X_C|Z_D|Z_E|Z_HALF</code></div>
+          <div>• <code>MOVE_MM X|Z [mm]</code> / <code>STEP X|Z [±mm]</code></div>
+          <div>• <code>MOVE X|Z [µs]</code> / <code>HOME [ALL|X|Z]</code></div>
+          <div>• <code>MAGNET [ALL|1..4] [ON|OFF]</code></div>
+          <div>• <code>CHECK METAL</code> / <code>CHECK GROUP [1..4]</code></div>
+          <div>• <code>WAIT PRESS</code> / <code>DELAY [ms]</code></div>
+          <div>• <code>REPEAT [次數]</code> ... <code>END</code> / <code>MSG [文字]</code></div>
         </div>
       </div>
     </div>

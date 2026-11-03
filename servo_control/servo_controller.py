@@ -1157,14 +1157,39 @@ macro_thread = None
 macro_running = False
 macro_paused = False
 
+def _wait_macro_motor_target(axis, target_pulse):
+    """輔助函式：在巨集/積木執行中等待 X 或 Z 軸到達目標脈衝位置"""
+    st = x_stepper if axis == 'x' else (z_stepper or y_stepper)
+    min_l = state['x_min'] if axis == 'x' else state.get('z_min', state['y_min'])
+    max_l = state['x_max'] if axis == 'x' else state.get('z_max', state['y_max'])
+    clamped_target = max(min_l, min(max_l, target_pulse))
+
+    t_move_start = time.time()
+    while macro_running and not macro_paused:
+        if st is None:
+            break
+        if abs(st.current_pos - clamped_target) < 10:
+            break
+        # 限位觸發時及時跳出，防止死等卡死
+        if axis == 'x' and ((clamped_target < st.current_pos and (state.get('lim_x_a') or state.get('lim_left'))) or (clamped_target > st.current_pos and (state.get('lim_x_c') or state.get('lim_right')))):
+            break
+        if axis in ('z', 'y', 'y1', 'y2') and ((clamped_target < st.current_pos and (state.get('lim_z_e') or state.get('lim_down'))) or (clamped_target > st.current_pos and (state.get('lim_z_d') or state.get('lim_up')))):
+            break
+        if time.time() - t_move_start > 15.0:
+            add_history(f"巨集警告: 移動至 {target_pulse:.0f}µs 到位超時", "warn")
+            break
+        time.sleep(0.05)
+
 def run_macro_loop(commands):
     global macro_running, macro_paused
     macro_running = True
     macro_paused = False
+    state['system_run'] = True
     
-    add_history("巨集執行開始", "success")
+    add_history("🧩 積木/巨集程式執行開始", "success")
     socketio.emit('macro_status', {'running': True, 'paused': False, 'current_line': 0})
     
+    loop_stack = []  # 儲存 [{'start_idx': int, 'remaining': int}]
     idx = 0
     while idx < len(commands) and macro_running:
         if macro_paused:
@@ -1181,44 +1206,115 @@ def run_macro_loop(commands):
         parts = cmd.split()
         op = parts[0].upper()
         
-        if op == 'MOVE':
+        if op == 'REPEAT':
+            cnt = 2
+            if len(parts) >= 2:
+                try:
+                    cnt = max(1, min(999, int(parts[1])))
+                except ValueError:
+                    cnt = 2
+            loop_stack.append({'start_idx': idx, 'remaining': cnt - 1, 'total': cnt})
+            add_history(f"🔁 積木迴圈開始: 重複執行 {cnt} 次", "info")
+            continue
+
+        elif op in ('END', 'END_REPEAT'):
+            if loop_stack:
+                top = loop_stack[-1]
+                if top['remaining'] > 0:
+                    top['remaining'] -= 1
+                    done_cnt = top['total'] - top['remaining']
+                    add_history(f"🔁 迴圈第 {done_cnt}/{top['total']} 次開始...", "info")
+                    idx = top['start_idx']
+                    continue
+                else:
+                    loop_stack.pop()
+                    add_history("🔁 積木迴圈結束", "info")
+            continue
+
+        elif op == 'MOVE':
             if len(parts) >= 3:
                 axis = parts[1].lower()
                 try:
-                    target = float(parts[2])
-                    set_servo_pulse(axis, target)
-                    add_history(f"巨集指令: 移動 {axis.upper()} 至 {target} µs", "info")
-                    
-                    st = x_stepper if axis == 'x' else (z_stepper or y_stepper)
-                    min_l = state['x_min'] if axis == 'x' else state.get('z_min', state['y_min'])
-                    max_l = state['x_max'] if axis == 'x' else state.get('z_max', state['y_max'])
-                    clamped_target = max(min_l, min(max_l, target))
-                    
-                    t_move_start = time.time()
-                    while macro_running and not macro_paused:
-                        if st is None:
-                            break
-                        if abs(st.current_pos - clamped_target) < 10:
-                            break
-                        # 限位觸發時及時跳出，防止死等卡死
-                        if axis == 'x' and ((clamped_target < st.current_pos and (state.get('lim_x_a') or state.get('lim_left'))) or (clamped_target > st.current_pos and (state.get('lim_x_c') or state.get('lim_right')))):
-                            break
-                        if axis in ('z', 'y', 'y1', 'y2') and ((clamped_target < st.current_pos and (state.get('lim_z_e') or state.get('lim_down'))) or (clamped_target > st.current_pos and (state.get('lim_z_d') or state.get('lim_up')))):
-                            break
-                        if time.time() - t_move_start > 15.0:
-                            add_history(f"巨集警告: 移動至 {target}µs 到位超時", "warn")
-                            break
-                        time.sleep(0.05)
+                    val_str = parts[2].lower()
+                    if val_str.endswith('mm'):
+                        mm_val = float(val_str[:-2])
+                        scale = state['x_scale'] if axis == 'x' else state.get('z_scale', state['y_scale'])
+                        base_min = state['x_min'] if axis == 'x' else state.get('z_min', state['y_min'])
+                        target = base_min + mm_val * scale
+                        set_servo_pulse(axis, target)
+                        add_history(f"巨集指令: 移動 {axis.upper()} 至 {mm_val:.1f} mm ({target:.0f} µs)", "info")
+                    else:
+                        target = float(val_str)
+                        set_servo_pulse(axis, target)
+                        add_history(f"巨集指令: 移動 {axis.upper()} 至 {target:.0f} µs", "info")
+                    _wait_macro_motor_target(axis, target)
                 except ValueError:
                     add_history(f"巨集錯誤: 無效的移動座標 '{parts[2]}'", "error")
             else:
                 add_history("巨集錯誤: MOVE 指令參數不足", "error")
+
+        elif op == 'MOVE_MM':
+            if len(parts) >= 3:
+                axis = parts[1].lower()
+                try:
+                    mm_val = float(parts[2])
+                    scale = state['x_scale'] if axis == 'x' else state.get('z_scale', state['y_scale'])
+                    base_min = state['x_min'] if axis == 'x' else state.get('z_min', state['y_min'])
+                    target = base_min + mm_val * scale
+                    set_servo_pulse(axis, target)
+                    add_history(f"🧩 積木移動: {axis.upper()} 軸前往 {mm_val:.1f} mm ({target:.0f} µs)", "info")
+                    _wait_macro_motor_target(axis, target)
+                except ValueError:
+                    add_history(f"巨集錯誤: 無效的 mm 座標 '{parts[2]}'", "error")
+            else:
+                add_history("巨集錯誤: MOVE_MM 指令參數不足", "error")
+
+        elif op == 'GOTO':
+            if len(parts) >= 2:
+                pt = parts[1].upper()
+                z_min = float(state.get('z_min', state['y_min']))
+                z_max = float(state.get('z_max', state['y_max']))
+                point_map = {
+                    'X_A': ('x', float(state['x_min']), 'X軸 a點 (0mm 歸零原點)'),
+                    'X_B': ('x', float((state['x_min'] + state['x_max']) / 2.0), 'X軸 b點 (100mm 中間模具工位)'),
+                    'X_C': ('x', float(state['x_max']), 'X軸 c點 (200mm 右極限放料位)'),
+                    'Z_D': ('z', z_max, 'Z軸 d點 (200mm 向上安全高度)'),
+                    'Z_E': ('z', z_min, 'Z軸 e點 (0mm 向下取放高度)'),
+                    'Z_HALF': ('z', float((z_min + z_max) / 2.0), 'Z軸 50% (100mm 避讓高度)'),
+                }
+                if pt in point_map:
+                    axis, target, label = point_map[pt]
+                    set_servo_pulse(axis, target)
+                    add_history(f"🧩 積木定位: 前往【{label}】", "info")
+                    _wait_macro_motor_target(axis, target)
+                else:
+                    add_history(f"巨集錯誤: 未知的工位點 '{pt}'", "error")
+            else:
+                add_history("巨集錯誤: GOTO 指令參數不足", "error")
+
+        elif op == 'STEP':
+            if len(parts) >= 3:
+                axis = parts[1].lower()
+                try:
+                    delta_mm = float(parts[2])
+                    scale = state['x_scale'] if axis == 'x' else state.get('z_scale', state['y_scale'])
+                    st = x_stepper if axis == 'x' else (z_stepper or y_stepper)
+                    cur_pos = st.current_pos if st else (state['x_pulse'] if axis == 'x' else state['z_pulse'])
+                    target = cur_pos + delta_mm * scale
+                    set_servo_pulse(axis, target)
+                    dir_str = f"+{delta_mm:.1f}" if delta_mm >= 0 else f"{delta_mm:.1f}"
+                    add_history(f"🧩 積木相對移動: {axis.upper()} 軸 {dir_str} mm", "info")
+                    _wait_macro_motor_target(axis, target)
+                except ValueError:
+                    add_history(f"巨集錯誤: 無效的步進距離 '{parts[2]}'", "error")
+            else:
+                add_history("巨集錯誤: STEP 指令參數不足", "error")
                 
         elif op == 'DELAY':
             if len(parts) >= 2:
                 try:
                     ms = float(parts[1])
-                    add_history(f"巨集指令: 延遲 {ms} 毫秒", "info")
+                    add_history(f"巨集指令: 延遲 {ms:.0f} 毫秒", "info")
                     elapsed = 0.0
                     while elapsed < (ms / 1000.0) and macro_running:
                         if not macro_paused:
@@ -1238,6 +1334,11 @@ def run_macro_loop(commands):
                 set_digital_output(f'magnet_{g}', val)
                 add_history(f"巨集指令: 第 {g} 組電磁鐵 (M{g}) {'通電 ON' if val else '斷電 OFF'}", "info")
                 time.sleep(0.4)
+            elif len(parts) >= 3 and parts[1].upper() == 'ALL':
+                val = parts[2].upper() == 'ON'
+                set_digital_output('magnet', val)
+                add_history(f"巨集指令: 4組電磁鐵吸盤 (M1~M4) {'全部通電 ON' if val else '全部斷電 OFF'}", "info")
+                time.sleep(0.4)
             elif len(parts) >= 2:
                 val = parts[1].upper() == 'ON'
                 set_digital_output('magnet', val)
@@ -1250,13 +1351,22 @@ def run_macro_loop(commands):
             if len(parts) >= 2 and parts[1].upper() == 'METAL':
                 read_limit_switches()
                 if not state.get('hall_arm_metal'):
-                    add_history("巨集錯誤: 手臂霍爾感測未檢測到金屬工件！", "error")
+                    add_history("巨集錯誤: 末端霍爾感測陣列 (8顆/4組) 未檢測到金屬工件！", "error")
                     set_digital_output('magnet', False)
                     break
                 else:
-                    add_history("巨集檢測: 手臂霍爾感測金屬工件正常！", "success")
+                    add_history(f"巨集檢測: 末端霍爾感測金屬工件正常 ({state.get('hall_active_count', 0)}/8 顆觸發)！", "success")
+            elif len(parts) >= 3 and parts[1].upper() == 'GROUP' and parts[2].isdigit() and int(parts[2]) in (1, 2, 3, 4):
+                g = int(parts[2])
+                read_limit_switches()
+                if not state.get(f'hall_group_{g}'):
+                    add_history(f"巨集錯誤: 第 {g} 組霍爾開關 (G{g}) 未檢測到金屬工件！", "error")
+                    set_digital_output('magnet', False)
+                    break
+                else:
+                    add_history(f"巨集檢測: 第 {g} 組霍爾開關 (G{g}) 金屬工件確認在位！", "success")
             else:
-                add_history("巨集錯誤: CHECK 指令格式為 CHECK METAL", "error")
+                add_history("巨集錯誤: CHECK 指令格式為 CHECK METAL 或 CHECK GROUP 1~4", "error")
 
         elif op == 'WAIT':
             if len(parts) >= 2 and parts[1].upper() == 'PRESS':
@@ -1299,7 +1409,7 @@ def run_macro_loop(commands):
             
     macro_running = False
     socketio.emit('macro_status', {'running': False, 'paused': False, 'current_line': 0})
-    add_history("巨集執行結束", "success")
+    add_history("🧩 積木/巨集程式執行結束", "success")
 
 # ── REST API ──────────────────────────────────────────────────────
 @app.route('/api/start', methods=['POST'])
@@ -1764,14 +1874,18 @@ def api_macro_run():
     data = request.get_json(silent=True) or {}
     action = data.get('action') # 'start', 'stop', 'pause', 'resume'
     name = data.get('name')
+    direct_commands = data.get('commands')
     
     if action == 'start':
         if macro_running:
-            return jsonify({'ok': False, 'msg': '巨集已在運行中'})
-        macros = load_macros()
-        commands = macros.get(name)
+            return jsonify({'ok': False, 'msg': '巨集或積木程式已在運行中'})
+        if isinstance(direct_commands, list) and len(direct_commands) > 0:
+            commands = [str(c) for c in direct_commands]
+        else:
+            macros = load_macros()
+            commands = macros.get(name)
         if not commands:
-            return jsonify({'ok': False, 'msg': '找不到該巨集'})
+            return jsonify({'ok': False, 'msg': '找不到該巨集或積木指令為空'})
         macro_thread = threading.Thread(target=run_macro_loop, args=(commands,), daemon=True)
         macro_thread.start()
         return jsonify({'ok': True})

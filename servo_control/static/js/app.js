@@ -384,6 +384,7 @@ function updateUI() {
   const zMm = s.z_mm !== undefined ? s.z_mm : ((zPulse - 500) / zScale);
   setEl('yMmDisplay', el => el.textContent = `${zMm.toFixed(1)} mm`);
   setEl('yMmCurVal', el => el.textContent = `${zMm.toFixed(1)} mm`);
+  setEl('blockLiveCoordText', el => el.textContent = `X: ${xMm.toFixed(1)}mm / Z: ${zMm.toFixed(1)}mm`);
 
   // 進階設定輸入值綁定 (非使用者正在編輯時才同步)
   if (!settingsDirty) {
@@ -1162,9 +1163,629 @@ async function clearHistory() {
   }
 }
 
-// ── 動作巨集編輯與控制 ───────────────────────────────────────────
+// ── 🧩 積木式移動程式工作坊 & 動作巨集控制 ─────────────────────────
 let macros = {};
 let currentMacroName = "";
+let blockList = [];
+let draggedBlockIndex = null;
+let draggedPaletteType = null;
+let activeRunningLine = 0;
+
+function _uid() {
+  return 'blk_' + Math.random().toString(36).substring(2, 9);
+}
+
+// 建立預設積木物件
+function createBlockObject(type, overrides = {}) {
+  const defaults = {
+    GOTO:         { type: 'GOTO', point: 'X_A' },
+    MOVE_MM:      { type: 'MOVE_MM', axis: 'X', mm: 100.0 },
+    STEP:         { type: 'STEP', axis: 'X', delta: 20.0 },
+    HOME:         { type: 'HOME', axis: 'ALL' },
+    MOVE:         { type: 'MOVE', axis: 'X', pulse: 1500 },
+    MAGNET_ALL:   { type: 'MAGNET_ALL', state: 'ON' },
+    MAGNET_GROUP: { type: 'MAGNET_GROUP', group: '1', state: 'ON' },
+    DELAY:        { type: 'DELAY', ms: 500 },
+    CHECK_METAL:  { type: 'CHECK_METAL' },
+    CHECK_GROUP:  { type: 'CHECK_GROUP', group: '1' },
+    WAIT_PRESS:   { type: 'WAIT_PRESS' },
+    REPEAT:       { type: 'REPEAT', count: 3 },
+    END:          { type: 'END' },
+    MSG:          { type: 'MSG', text: '搬運步驟完成！' },
+    COMMENT:      { type: 'COMMENT', text: '步驟說明' }
+  };
+  return { id: _uid(), ...(defaults[type] || defaults.COMMENT), ...overrides };
+}
+
+// 將單塊積木轉譯為單行巨集指令 (1對1對應行號，支援即時高亮)
+function blockToCommandLine(b) {
+  switch (b.type) {
+    case 'GOTO':
+      return `GOTO ${b.point || 'X_A'}`;
+    case 'MOVE_MM':
+      return `MOVE_MM ${(b.axis || 'X').toUpperCase()} ${parseFloat(b.mm ?? 100).toFixed(1)}`;
+    case 'STEP':
+      return `STEP ${(b.axis || 'X').toUpperCase()} ${parseFloat(b.delta ?? 10).toFixed(1)}`;
+    case 'HOME':
+      return (!b.axis || b.axis === 'ALL') ? 'HOME' : `HOME ${b.axis.toUpperCase()}`;
+    case 'MOVE':
+      return `MOVE ${(b.axis || 'X').toUpperCase()} ${Math.round(parseFloat(b.pulse ?? 1500))}`;
+    case 'MAGNET_ALL':
+      return `MAGNET ${(b.state || 'ON').toUpperCase()}`;
+    case 'MAGNET_GROUP':
+      return `MAGNET ${b.group || '1'} ${(b.state || 'ON').toUpperCase()}`;
+    case 'DELAY':
+      return `DELAY ${Math.max(0, Math.round(parseFloat(b.ms ?? 500)))}`;
+    case 'CHECK_METAL':
+      return 'CHECK METAL';
+    case 'CHECK_GROUP':
+      return `CHECK GROUP ${b.group || '1'}`;
+    case 'WAIT_PRESS':
+      return 'WAIT PRESS';
+    case 'REPEAT':
+      return `REPEAT ${Math.max(1, parseInt(b.count || 2, 10))}`;
+    case 'END':
+      return 'END';
+    case 'MSG':
+      return `MSG ${b.text || '完成'}`;
+    case 'COMMENT':
+    default:
+      return `# ${(b.text || '').replace(/^#+\s*/, '')}`;
+  }
+}
+
+// 將單行巨集指令解析為積木物件
+function commandLineToBlock(line) {
+  const raw = (line || '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('#') || raw.startsWith('//')) {
+    return createBlockObject('COMMENT', { text: raw.replace(/^(#|\/\/)\s*/, '') });
+  }
+  const parts = raw.split(/\s+/);
+  const op = parts[0].toUpperCase();
+
+  if (op === 'GOTO' && parts.length >= 2) {
+    return createBlockObject('GOTO', { point: parts[1].toUpperCase() });
+  }
+  if (op === 'MOVE_MM' && parts.length >= 3) {
+    const ax = parts[1].toUpperCase() === 'Y' ? 'Z' : parts[1].toUpperCase();
+    return createBlockObject('MOVE_MM', { axis: ax, mm: parseFloat(parts[2]) || 0 });
+  }
+  if (op === 'STEP' && parts.length >= 3) {
+    const ax = parts[1].toUpperCase() === 'Y' ? 'Z' : parts[1].toUpperCase();
+    return createBlockObject('STEP', { axis: ax, delta: parseFloat(parts[2]) || 10 });
+  }
+  if (op === 'MOVE' && parts.length >= 3) {
+    const ax = parts[1].toUpperCase() === 'Y' ? 'Z' : parts[1].toUpperCase();
+    const valStr = parts[2].toLowerCase();
+    if (valStr.endsWith('mm')) {
+      return createBlockObject('MOVE_MM', { axis: ax, mm: parseFloat(valStr) || 0 });
+    }
+    return createBlockObject('MOVE', { axis: ax, pulse: parseFloat(valStr) || 1500 });
+  }
+  if (op === 'HOME') {
+    const ax = parts.length >= 2 ? parts[1].toUpperCase() : 'ALL';
+    return createBlockObject('HOME', { axis: (ax === 'Y' ? 'Z' : ax) });
+  }
+  if (op === 'MAGNET' || op === 'VACUUM') {
+    if (parts.length >= 3 && ['1', '2', '3', '4'].includes(parts[1])) {
+      return createBlockObject('MAGNET_GROUP', { group: parts[1], state: parts[2].toUpperCase() === 'OFF' ? 'OFF' : 'ON' });
+    }
+    const st = (parts[parts.length - 1] || 'ON').toUpperCase() === 'OFF' ? 'OFF' : 'ON';
+    return createBlockObject('MAGNET_ALL', { state: st });
+  }
+  if (op === 'DELAY' && parts.length >= 2) {
+    return createBlockObject('DELAY', { ms: parseFloat(parts[1]) || 500 });
+  }
+  if (op === 'CHECK') {
+    if (parts.length >= 3 && parts[1].toUpperCase() === 'GROUP') {
+      return createBlockObject('CHECK_GROUP', { group: parts[2] });
+    }
+    return createBlockObject('CHECK_METAL');
+  }
+  if (op === 'WAIT') {
+    return createBlockObject('WAIT_PRESS');
+  }
+  if (op === 'ARM' && parts.length >= 2) {
+    const isDown = parts[1].toUpperCase() === 'DOWN';
+    return createBlockObject('GOTO', { point: isDown ? 'Z_E' : 'Z_D' });
+  }
+  if (op === 'REPEAT') {
+    return createBlockObject('REPEAT', { count: parseInt(parts[1] || '2', 10) || 2 });
+  }
+  if (op === 'END' || op === 'END_REPEAT') {
+    return createBlockObject('END');
+  }
+  if (op === 'MSG') {
+    return createBlockObject('MSG', { text: parts.slice(1).join(' ') });
+  }
+  return createBlockObject('COMMENT', { text: raw });
+}
+
+// 將積木陣列同步至右側文字編輯器
+function syncBlocksToText() {
+  const editor = document.getElementById('macroEditor');
+  if (!editor) return;
+  const lines = blockList.map(b => blockToCommandLine(b));
+  editor.value = lines.join('\n');
+  const cntEl = document.getElementById('blockTotalCount');
+  if (cntEl) cntEl.textContent = blockList.length;
+}
+
+// 將文字編輯器內容解析為積木陣列並渲染
+function syncTextToBlocks() {
+  const editor = document.getElementById('macroEditor');
+  if (!editor) return;
+  const rawLines = editor.value.split('\n');
+  const parsed = [];
+  rawLines.forEach(line => {
+    const blk = commandLineToBlock(line);
+    if (blk) parsed.push(blk);
+  });
+  blockList = parsed;
+  renderBlockWorkspace(false);
+}
+
+let _textSyncTimer = null;
+function onMacroTextManualInput() {
+  if (_textSyncTimer) clearTimeout(_textSyncTimer);
+  _textSyncTimer = setTimeout(() => {
+    syncTextToBlocks();
+  }, 350);
+}
+
+// 渲染積木拼圖畫布
+function renderBlockWorkspace(updateText = true) {
+  const canvas = document.getElementById('blockWorkspaceCanvas');
+  if (!canvas) return;
+  if (updateText) syncBlocksToText();
+
+  const cntEl = document.getElementById('blockTotalCount');
+  if (cntEl) cntEl.textContent = blockList.length;
+
+  if (blockList.length === 0) {
+    canvas.innerHTML = `
+      <div style="margin:auto;text-align:center;padding:60px 20px;color:var(--text-dim)">
+        <div style="font-size:44px;margin-bottom:10px">🧩</div>
+        <div style="font-size:15px;font-weight:700;color:var(--text-sec);margin-bottom:6px">積木畫布目前為空</div>
+        <div style="font-size:12px">請點擊左側「積木工具箱」加入動作積木，或點擊上方「⚡ 快速範本積木組」一鍵載入！</div>
+      </div>
+    `;
+    return;
+  }
+
+  canvas.innerHTML = '';
+  let indentLevel = 0;
+
+  blockList.forEach((b, idx) => {
+    if (b.type === 'END') indentLevel = Math.max(0, indentLevel - 1);
+
+    const el = document.createElement('div');
+    const colorClass = _getBlockColorClass(b.type);
+    const isRunningThis = (activeRunningLine === idx + 1);
+    el.className = `puzzle-block ${colorClass}${isRunningThis ? ' block-active-running' : ''}`;
+    el.style.marginLeft = `${indentLevel * 24}px`;
+    el.draggable = true;
+    el.dataset.index = idx;
+
+    el.ondragstart = (ev) => onBlockDragStart(ev, idx);
+    el.ondragover  = (ev) => onBlockDragOver(ev, idx, el);
+    el.ondragleave = ()   => el.classList.remove('drag-over');
+    el.ondrop      = (ev) => onBlockDrop(ev, idx);
+    el.ondragend   = ()   => {
+      el.classList.remove('dragging');
+      document.querySelectorAll('.puzzle-block').forEach(p => p.classList.remove('drag-over'));
+    };
+
+    const stepBadge = `<span class="puzzle-step-badge">#${idx + 1}</span>`;
+    const bodyHtml  = _renderBlockBodyHTML(b, idx);
+    const actHtml   = `
+      <div class="puzzle-actions">
+        ${(b.type === 'MOVE_MM' || b.type === 'MOVE') ? `<button class="puzzle-act-btn" onclick="teachBlockCurrentPos(${idx})" title="將目前機台 ${b.axis || 'X'} 軸座標填入此積木">📍 取當前值</button>` : ''}
+        <button class="puzzle-act-btn" onclick="testSingleBlock(${idx})" title="單步測試執行此塊積木">▶ 測試</button>
+        <button class="puzzle-act-btn" onclick="moveBlockOrder(${idx}, -1)" title="上移">▲</button>
+        <button class="puzzle-act-btn" onclick="moveBlockOrder(${idx}, 1)" title="下移">▼</button>
+        <button class="puzzle-act-btn" onclick="duplicateBlock(${idx})" title="複製此積木">📋</button>
+        <button class="puzzle-act-btn danger" onclick="removeBlock(${idx})" title="刪除此積木">✖</button>
+      </div>
+    `;
+
+    el.innerHTML = stepBadge + bodyHtml + actHtml;
+    canvas.appendChild(el);
+
+    if (b.type === 'REPEAT') indentLevel += 1;
+  });
+}
+
+function _getBlockColorClass(type) {
+  switch (type) {
+    case 'GOTO':
+    case 'HOME':         return 'btype-point';
+    case 'MOVE_MM':
+    case 'STEP':
+    case 'MOVE':         return 'btype-motion';
+    case 'MAGNET_ALL':
+    case 'MAGNET_GROUP': return 'btype-magnet';
+    case 'CHECK_METAL':
+    case 'CHECK_GROUP':  return 'btype-sensor';
+    case 'DELAY':
+    case 'WAIT_PRESS':   return 'btype-wait';
+    case 'REPEAT':
+    case 'END':          return 'btype-loop';
+    case 'MSG':          return 'btype-msg';
+    default:             return 'btype-comment';
+  }
+}
+
+function _renderBlockBodyHTML(b, idx) {
+  switch (b.type) {
+    case 'GOTO': {
+      const opts = [
+        ['X_A', '↔️ X軸 a點 (0mm 左歸零原點)'],
+        ['X_B', '↔️ X軸 b點 (100mm 中間模具位)'],
+        ['X_C', '↔️ X軸 c點 (200mm 右極限放料位)'],
+        ['Z_D', '↕️ Z軸 d點 (200mm 向上安全高度)'],
+        ['Z_E', '↕️ Z軸 e點 (0mm 向下取放高度)'],
+        ['Z_HALF', '↕️ Z軸 50% (100mm 避讓高度)']
+      ].map(([k, label]) => `<option value="${k}" ${b.point === k ? 'selected' : ''}>${label}</option>`).join('');
+      return `<span>📍 快速定位前往</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'point', this.value)">${opts}</select>`;
+    }
+    case 'MOVE_MM': {
+      return `<span>📏 絕對移動</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'axis', this.value)">
+                <option value="X" ${b.axis === 'X' ? 'selected' : ''}>↔️ X 軸 (橫移)</option>
+                <option value="Z" ${b.axis === 'Z' ? 'selected' : ''}>↕️ Z 軸 (升降)</option>
+              </select>
+              <span>到座標</span>
+              <input type="number" class="puzzle-input" style="width:86px" step="1" min="0" max="500" value="${b.mm ?? 100}"
+                     oninput="updateBlockField(${idx}, 'mm', parseFloat(this.value)||0, false)"
+                     onchange="updateBlockField(${idx}, 'mm', parseFloat(this.value)||0, true)">
+              <span>mm</span>`;
+    }
+    case 'STEP': {
+      return `<span>👣 相對寸動</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'axis', this.value)">
+                <option value="X" ${b.axis === 'X' ? 'selected' : ''}>↔️ X 軸</option>
+                <option value="Z" ${b.axis === 'Z' ? 'selected' : ''}>↕️ Z 軸</option>
+              </select>
+              <span>移動距離</span>
+              <input type="number" class="puzzle-input" style="width:86px" step="1" min="-500" max="500" value="${b.delta ?? 20}"
+                     oninput="updateBlockField(${idx}, 'delta', parseFloat(this.value)||0, false)"
+                     onchange="updateBlockField(${idx}, 'delta', parseFloat(this.value)||0, true)">
+              <span>mm (正/負)</span>`;
+    }
+    case 'HOME': {
+      return `<span>🏠 執行原點平穩歸零：</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'axis', this.value)">
+                <option value="ALL" ${b.axis === 'ALL' ? 'selected' : ''}>全軸同步歸零 (X回a點 + Z回d點)</option>
+                <option value="X" ${b.axis === 'X' ? 'selected' : ''}>僅 X 軸歸零 (回左端 a 點)</option>
+                <option value="Z" ${b.axis === 'Z' ? 'selected' : ''}>僅 Z 軸歸零 (回頂部 d 點)</option>
+              </select>`;
+    }
+    case 'MOVE': {
+      return `<span>⚡ 脈衝移動</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'axis', this.value)">
+                <option value="X" ${b.axis === 'X' ? 'selected' : ''}>↔️ X 軸</option>
+                <option value="Z" ${b.axis === 'Z' ? 'selected' : ''}>↕️ Z 軸</option>
+              </select>
+              <span>至脈衝</span>
+              <input type="number" class="puzzle-input" style="width:92px" step="10" min="500" max="2500" value="${b.pulse ?? 1500}"
+                     oninput="updateBlockField(${idx}, 'pulse', parseFloat(this.value)||500, false)"
+                     onchange="updateBlockField(${idx}, 'pulse', parseFloat(this.value)||500, true)">
+              <span>µs</span>`;
+    }
+    case 'MAGNET_ALL': {
+      return `<span>🧲 全部 4 組電磁鐵 (M1~M4)</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'state', this.value)">
+                <option value="ON" ${b.state === 'ON' ? 'selected' : ''}>⚡ 全部通電吸取 (ON)</option>
+                <option value="OFF" ${b.state === 'OFF' ? 'selected' : ''}>⭕ 全部斷電釋放 (OFF)</option>
+              </select>`;
+    }
+    case 'MAGNET_GROUP': {
+      return `<span>🧲 單組電磁鐵</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'group', this.value)">
+                <option value="1" ${String(b.group) === '1' ? 'selected' : ''}>第 1 組 M1 (GPIO 24 / 對應霍爾G1)</option>
+                <option value="2" ${String(b.group) === '2' ? 'selected' : ''}>第 2 組 M2 (GPIO 18 / 對應霍爾G2)</option>
+                <option value="3" ${String(b.group) === '3' ? 'selected' : ''}>第 3 組 M3 (GPIO 14 / 對應霍爾G3)</option>
+                <option value="4" ${String(b.group) === '4' ? 'selected' : ''}>第 4 組 M4 (GPIO 15 / 對應霍爾G4)</option>
+              </select>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'state', this.value)">
+                <option value="ON" ${b.state === 'ON' ? 'selected' : ''}>⚡ 通電吸取 (ON)</option>
+                <option value="OFF" ${b.state === 'OFF' ? 'selected' : ''}>⭕ 斷電釋放 (OFF)</option>
+              </select>`;
+    }
+    case 'DELAY': {
+      return `<span>⏱️ 延遲等待</span>
+              <input type="number" class="puzzle-input" style="width:90px" step="100" min="50" max="60000" value="${b.ms ?? 500}"
+                     oninput="updateBlockField(${idx}, 'ms', parseFloat(this.value)||100, false)"
+                     onchange="updateBlockField(${idx}, 'ms', parseFloat(this.value)||100, true)">
+              <span>毫秒 (ms)</span>`;
+    }
+    case 'CHECK_METAL': {
+      return `<span>🛡️ 防呆檢查：末端 8 顆霍爾開關 (4組) 是否吸住金屬工件 (未吸住自動停機)</span>`;
+    }
+    case 'CHECK_GROUP': {
+      return `<span>🔍 防呆檢查：指定霍爾</span>
+              <select class="puzzle-select" onchange="updateBlockField(${idx}, 'group', this.value)">
+                <option value="1" ${String(b.group) === '1' ? 'selected' : ''}>第 1 組 G1 (H1+H2 / GPIO 6,7)</option>
+                <option value="2" ${String(b.group) === '2' ? 'selected' : ''}>第 2 組 G2 (H3+H4 / GPIO 8,9)</option>
+                <option value="3" ${String(b.group) === '3' ? 'selected' : ''}>第 3 組 G3 (H5+H6 / GPIO 10,11)</option>
+                <option value="4" ${String(b.group) === '4' ? 'selected' : ''}>第 4 組 G4 (H7+H8 / GPIO 4,21)</option>
+              </select>
+              <span>雙顆皆確認吸住金屬</span>`;
+    }
+    case 'WAIT_PRESS': {
+      return `<span>⏳ 等待衝壓機模具衝壓完成訊號 (PRESS_DONE GPIO 5)</span>`;
+    }
+    case 'REPEAT': {
+      return `<span>🔁 迴圈開始：重複執行下方區塊</span>
+              <input type="number" class="puzzle-input" style="width:74px" step="1" min="1" max="999" value="${b.count ?? 3}"
+                     oninput="updateBlockField(${idx}, 'count', parseInt(this.value,10)||1, false)"
+                     onchange="updateBlockField(${idx}, 'count', parseInt(this.value,10)||1, true)">
+              <span>次</span>`;
+    }
+    case 'END': {
+      return `<span>🔚 迴圈結束 (END REPEAT)</span>`;
+    }
+    case 'MSG': {
+      return `<span>💬 彈出提示訊息：</span>
+              <input type="text" class="puzzle-input" style="width:220px" value="${(b.text || '').replace(/"/g, '&quot;')}"
+                     oninput="updateBlockField(${idx}, 'text', this.value, false)"
+                     onchange="updateBlockField(${idx}, 'text', this.value, true)">`;
+    }
+    case 'COMMENT':
+    default: {
+      return `<span>📝 步驟註解：</span>
+              <input type="text" class="puzzle-input" style="width:240px" value="${(b.text || '').replace(/"/g, '&quot;')}"
+                     oninput="updateBlockField(${idx}, 'text', this.value, false)"
+                     onchange="updateBlockField(${idx}, 'text', this.value, true)">`;
+    }
+  }
+}
+
+// 更新積木欄位值
+function updateBlockField(idx, field, value, rerender = true) {
+  if (!blockList[idx]) return;
+  blockList[idx][field] = value;
+  syncBlocksToText();
+  if (rerender) renderBlockWorkspace(false);
+}
+
+// 點擊左側工具箱新增積木
+function addBlockByType(type, insertAt = null) {
+  if (type === 'REPEAT_PAIR') {
+    const rep = createBlockObject('REPEAT', { count: 3 });
+    const end = createBlockObject('END');
+    if (insertAt !== null && insertAt >= 0 && insertAt <= blockList.length) {
+      blockList.splice(insertAt, 0, rep, end);
+    } else {
+      blockList.push(rep, end);
+    }
+  } else {
+    const blk = createBlockObject(type);
+    if (insertAt !== null && insertAt >= 0 && insertAt <= blockList.length) {
+      blockList.splice(insertAt, 0, blk);
+    } else {
+      blockList.push(blk);
+    }
+  }
+  renderBlockWorkspace(true);
+  const canvas = document.getElementById('blockWorkspaceCanvas');
+  if (canvas && insertAt === null) {
+    setTimeout(() => { canvas.scrollTop = canvas.scrollHeight; }, 30);
+  }
+}
+
+// 教導功能：將機台當前實際座標寫入指定積木
+function teachBlockCurrentPos(idx) {
+  const b = blockList[idx];
+  if (!b) return;
+  const xScale = state.x_scale || 10.0;
+  const zScale = state.z_scale || state.y_scale || 10.0;
+  const curXMm = state.x_mm !== undefined ? state.x_mm : ((state.x_pulse - state.x_min) / xScale);
+  const curZMm = state.z_mm !== undefined ? state.z_mm : (((state.z_pulse || state.y1_pulse) - state.y_min) / zScale);
+
+  if (b.type === 'MOVE_MM') {
+    b.mm = parseFloat(((b.axis === 'Z') ? curZMm : curXMm).toFixed(1));
+    toast(`📍 已填入當前 ${b.axis} 軸座標: ${b.mm} mm`, 'success');
+  } else if (b.type === 'MOVE') {
+    b.pulse = Math.round((b.axis === 'Z') ? (state.z_pulse || state.y1_pulse) : state.x_pulse);
+    toast(`📍 已填入當前 ${b.axis} 軸脈衝: ${b.pulse} µs`, 'success');
+  }
+  renderBlockWorkspace(true);
+}
+
+// 一鍵教導：直接把目前機台 X 與 Z 座標新增為兩塊移動積木
+function teachAddCurrentPosBlock() {
+  const xScale = state.x_scale || 10.0;
+  const zScale = state.z_scale || state.y_scale || 10.0;
+  const curXMm = parseFloat((state.x_mm !== undefined ? state.x_mm : ((state.x_pulse - state.x_min) / xScale)).toFixed(1));
+  const curZMm = parseFloat((state.z_mm !== undefined ? state.z_mm : (((state.z_pulse || state.y1_pulse) - state.y_min) / zScale)).toFixed(1));
+
+  blockList.push(
+    createBlockObject('MOVE_MM', { axis: 'X', mm: curXMm }),
+    createBlockObject('MOVE_MM', { axis: 'Z', mm: curZMm })
+  );
+  renderBlockWorkspace(true);
+  toast(`📍 已記錄目前座標積木：X=${curXMm}mm, Z=${curZMm}mm`, 'success');
+}
+
+// 單步測試單一積木
+async function testSingleBlock(idx) {
+  const b = blockList[idx];
+  if (!b) return;
+  const cmdLine = blockToCommandLine(b);
+  const r = await apiPost('/api/macro/run', { action: 'start', commands: [cmdLine] });
+  if (r.ok) {
+    toast(`▶ 單步測試積木 #${idx + 1}: ${cmdLine}`, 'info');
+  } else {
+    toast(r.msg || '無法執行單步測試', 'error');
+  }
+}
+
+// 排序、複製、刪除、清空積木
+function moveBlockOrder(idx, dir) {
+  const targetIdx = idx + dir;
+  if (targetIdx < 0 || targetIdx >= blockList.length) return;
+  const temp = blockList[idx];
+  blockList[idx] = blockList[targetIdx];
+  blockList[targetIdx] = temp;
+  renderBlockWorkspace(true);
+}
+
+function duplicateBlock(idx) {
+  const b = blockList[idx];
+  if (!b) return;
+  const copy = { ...b, id: _uid() };
+  blockList.splice(idx + 1, 0, copy);
+  renderBlockWorkspace(true);
+}
+
+function removeBlock(idx) {
+  blockList.splice(idx, 1);
+  renderBlockWorkspace(true);
+}
+
+function clearAllBlocks() {
+  if (blockList.length > 0 && !confirm('確定要清空畫布上的所有積木嗎？')) return;
+  blockList = [];
+  renderBlockWorkspace(true);
+}
+
+// 拖曳排序與工具箱拖放事件
+function onPaletteDragStart(ev, type) {
+  draggedPaletteType = type;
+  draggedBlockIndex = null;
+  ev.dataTransfer.effectAllowed = 'copy';
+}
+
+function onBlockDragStart(ev, idx) {
+  draggedBlockIndex = idx;
+  draggedPaletteType = null;
+  ev.currentTarget.classList.add('dragging');
+  ev.dataTransfer.effectAllowed = 'move';
+}
+
+function onBlockDragOver(ev, idx, el) {
+  ev.preventDefault();
+  el.classList.add('drag-over');
+}
+
+function onBlockDrop(ev, targetIdx) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  document.querySelectorAll('.puzzle-block').forEach(p => p.classList.remove('drag-over', 'dragging'));
+
+  if (draggedPaletteType) {
+    addBlockByType(draggedPaletteType, targetIdx);
+    draggedPaletteType = null;
+    return;
+  }
+
+  if (draggedBlockIndex !== null && draggedBlockIndex !== targetIdx) {
+    const [moved] = blockList.splice(draggedBlockIndex, 1);
+    blockList.splice(targetIdx, 0, moved);
+    renderBlockWorkspace(true);
+  }
+  draggedBlockIndex = null;
+}
+
+function onWorkspaceDragOver(ev) {
+  ev.preventDefault();
+}
+
+function onWorkspaceDrop(ev) {
+  ev.preventDefault();
+  if (draggedPaletteType) {
+    addBlockByType(draggedPaletteType, null);
+    draggedPaletteType = null;
+  }
+}
+
+// 快速範本載入
+function loadBlockPreset(presetName) {
+  if (presetName === 'stamping14') {
+    const lines = [
+      '# 14步衝壓自動上下料標準循環',
+      'GOTO X_A',
+      'GOTO Z_E',
+      'MAGNET ON',
+      'DELAY 400',
+      'GOTO Z_D',
+      'CHECK METAL',
+      'GOTO X_C',
+      'GOTO Z_E',
+      'MAGNET OFF',
+      'DELAY 400',
+      'GOTO Z_D',
+      'GOTO X_B',
+      'GOTO Z_HALF',
+      'WAIT PRESS',
+      'GOTO Z_D',
+      'GOTO X_A',
+      'MSG 14步衝壓搬運循環完成！'
+    ];
+    blockList = lines.map(l => commandLineToBlock(l)).filter(Boolean);
+    renderBlockWorkspace(true);
+    toast('🏭 已載入「14步衝壓自動搬運」積木範本！', 'success');
+  } else if (presetName === 'magnet4_group') {
+    const lines = [
+      '# 4組電磁鐵 (M1~M4) 與 4組霍爾 (G1~G4) 分組取放程序',
+      'HOME ALL',
+      'GOTO X_A',
+      'GOTO Z_E',
+      'MAGNET 1 ON',
+      'MAGNET 2 ON',
+      'MAGNET 3 ON',
+      'MAGNET 4 ON',
+      'DELAY 400',
+      'GOTO Z_D',
+      'CHECK GROUP 1',
+      'CHECK GROUP 2',
+      'GOTO X_C',
+      'GOTO Z_E',
+      'MAGNET 1 OFF',
+      'MAGNET 2 OFF',
+      'DELAY 400',
+      'GOTO Z_D',
+      'GOTO X_B',
+      'GOTO Z_E',
+      'MAGNET 3 OFF',
+      'MAGNET 4 OFF',
+      'DELAY 400',
+      'GOTO Z_D',
+      'GOTO X_A',
+      'MSG 4組電磁鐵分組取放完成！'
+    ];
+    blockList = lines.map(l => commandLineToBlock(l)).filter(Boolean);
+    renderBlockWorkspace(true);
+    toast('🧲 已載入「4組電磁鐵分組取放」積木範本！', 'success');
+  } else if (presetName === 'loop_patrol') {
+    const lines = [
+      '# 重複 3 次往復取放料迴圈範本',
+      'HOME ALL',
+      'REPEAT 3',
+      'GOTO X_A',
+      'GOTO Z_E',
+      'MAGNET ON',
+      'DELAY 400',
+      'GOTO Z_D',
+      'CHECK METAL',
+      'GOTO X_C',
+      'GOTO Z_E',
+      'MAGNET OFF',
+      'DELAY 400',
+      'GOTO Z_D',
+      'END',
+      'GOTO X_A',
+      'MSG 3次往復取放迴圈執行完畢！'
+    ];
+    blockList = lines.map(l => commandLineToBlock(l)).filter(Boolean);
+    renderBlockWorkspace(true);
+    toast('🔁 已載入「3次重複往復取放迴圈」積木範本！', 'success');
+  }
+}
 
 async function loadMacros() {
   try {
@@ -1205,34 +1826,36 @@ function onMacroSelect(name) {
   const editor = document.getElementById('macroEditor');
   if (editor && macros[name]) {
     editor.value = macros[name].join('\n');
+    syncTextToBlocks();
   }
 }
 
 async function saveCurrentMacro() {
   if (!currentMacroName) {
-    toast("請先選擇或新增一個巨集", "error");
+    toast("請先選擇或新增一個程式名稱", "error");
     return;
   }
+  syncBlocksToText();
   const text = document.getElementById('macroEditor').value;
   const commands = text.split('\n');
   const r = await apiPost('/api/macros', { name: currentMacroName, commands });
   if (r.ok) {
     macros[currentMacroName] = commands;
-    toast(`巨集「${currentMacroName}」儲存成功！`, "success");
+    toast(`🧩 積木移動程式「${currentMacroName}」儲存成功！`, "success");
   }
 }
 
 async function createMacro() {
   const name = document.getElementById('newMacroName').value.trim();
   if (!name) {
-    toast("請輸入巨集名稱", "error");
+    toast("請輸入新移動程式名稱", "error");
     return;
   }
   if (macros[name]) {
-    toast("巨集名稱已存在", "error");
+    toast("該程式名稱已存在", "error");
     return;
   }
-  const commands = ["# 新巨集腳本", "HOME", "DELAY 500"];
+  const commands = ["# 新積木移動程式", "HOME ALL", "GOTO X_A", "DELAY 500"];
   const r = await apiPost('/api/macros', { name, commands });
   if (r.ok) {
     macros[name] = commands;
@@ -1240,13 +1863,13 @@ async function createMacro() {
     document.getElementById('macroSelect').value = name;
     onMacroSelect(name);
     document.getElementById('newMacroName').value = "";
-    toast(`巨集「${name}」新增成功`, "success");
+    toast(`🧩 移動程式「${name}」新增成功`, "success");
   }
 }
 
 async function deleteMacro() {
   if (!currentMacroName) return;
-  if (confirm(`確定要刪除巨集「${currentMacroName}」嗎？`)) {
+  if (confirm(`確定要刪除移動程式「${currentMacroName}」嗎？`)) {
     const r = await fetch('/api/macros', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -1257,19 +1880,33 @@ async function deleteMacro() {
       delete macros[currentMacroName];
       currentMacroName = "";
       populateMacroList();
-      toast("巨集已刪除", "info");
+      toast("移動程式已刪除", "info");
     }
   }
 }
 
-async function runMacro() {
-  if (!currentMacroName) return;
-  const r = await apiPost('/api/macro/run', { action: 'start', name: currentMacroName });
+async function runBlockProgram() {
+  syncBlocksToText();
+  const editor = document.getElementById('macroEditor');
+  const commands = editor ? editor.value.split('\n').filter(l => l.trim().length > 0) : [];
+  if (commands.length === 0) {
+    toast("請先加入積木再執行！", "error");
+    return;
+  }
+  const r = await apiPost('/api/macro/run', {
+    action: 'start',
+    name: currentMacroName,
+    commands: editor.value.split('\n')
+  });
   if (r.ok) {
-    toast("巨集已啟動執行...", "success");
+    toast("🚀 積木移動程式已啟動執行！", "success");
   } else {
     toast(r.msg, "error");
   }
+}
+
+async function runMacro() {
+  return runBlockProgram();
 }
 
 async function pauseMacro() {
@@ -1282,7 +1919,7 @@ async function pauseMacro() {
       btn.className = "btn btn-success";
     } else {
       btn.textContent = "⏸ 暫停";
-      btn.className = "btn btn-amber";
+      btn.className = "btn btn-warning";
     }
   }
 }
@@ -1314,6 +1951,15 @@ socket.on('macro_status', (data) => {
   
   if (lineText && data.current_line !== undefined) {
     lineText.textContent = data.current_line;
+    activeRunningLine = data.running ? data.current_line : 0;
+    document.querySelectorAll('#blockWorkspaceCanvas .puzzle-block').forEach((el, idx) => {
+      if (activeRunningLine === idx + 1) {
+        el.classList.add('block-active-running');
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else {
+        el.classList.remove('block-active-running');
+      }
+    });
   }
   
   if (runBtn) runBtn.disabled = data.running;
@@ -1321,20 +1967,20 @@ socket.on('macro_status', (data) => {
     pauseBtn.disabled = !data.running;
     if (!data.running) {
       pauseBtn.textContent = "⏸ 暫停";
-      pauseBtn.className = "btn btn-amber";
+      pauseBtn.className = "btn btn-warning";
     } else if (data.paused) {
       pauseBtn.textContent = "▶ 繼續";
       pauseBtn.className = "btn btn-success";
     } else {
       pauseBtn.textContent = "⏸ 暫停";
-      pauseBtn.className = "btn btn-amber";
+      pauseBtn.className = "btn btn-warning";
     }
   }
   if (stopBtn) stopBtn.disabled = !data.running;
 });
 
 socket.on('macro_msg', (data) => {
-  toast(`[巨集提示] ${data.msg}`, 'success');
+  toast(`[積木提示] ${data.msg}`, 'success');
 });
 
 // ── G-code 解析與圖形繪製 ────────────────────────────────────────

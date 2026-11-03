@@ -1001,3 +1001,224 @@ canvas.gauge { display: block; }
   color: var(--text-dim);
   font-weight: bold;
 }
+
+/* ── 🧩 積木式移動程式工作坊 (Visual Block Programming Studio) ── */
+.block-studio-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr 310px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .block-studio-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.block-palette-group {
+  margin-bottom: 14px;
+}
+
+.block-palette-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-sec);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.palette-block-btn {
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  margin-bottom: 7px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+  position: relative;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+.palette-block-btn:hover {
+  transform: translateX(4px);
+  filter: brightness(1.12);
+}
+
+.palette-block-btn:active {
+  transform: scale(0.97);
+}
+
+/* 積木顏色主題 */
+.btype-motion {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  border-left: 5px solid #38bdf8;
+}
+.btype-point {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-left: 5px solid #60a5fa;
+}
+.btype-magnet {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  border-left: 5px solid #fbbf24;
+}
+.btype-sensor {
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  border-left: 5px solid #a78bfa;
+}
+.btype-wait {
+  background: linear-gradient(135deg, #0d9488, #0f766e);
+  border-left: 5px solid #2dd4bf;
+}
+.btype-loop {
+  background: linear-gradient(135deg, #059669, #047857);
+  border-left: 5px solid #34d399;
+}
+.btype-msg {
+  background: linear-gradient(135deg, #db2777, #be185d);
+  border-left: 5px solid #f472b6;
+}
+.btype-comment {
+  background: linear-gradient(135deg, #334155, #1e293b);
+  border-left: 5px solid #94a3b8;
+}
+
+/* 積木畫布容器 */
+.block-workspace-canvas {
+  min-height: 520px;
+  max-height: 680px;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.14) 1px, transparent 0) 0 0 / 20px 20px,
+    #060a12;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 16px 28px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 單顆拼圖積木 */
+.puzzle-block {
+  position: relative;
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  cursor: grab;
+  user-select: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.22);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+/* 拼圖上下凹凸卡榫視覺 */
+.puzzle-block::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 26px;
+  width: 24px;
+  height: 5px;
+  background: inherit;
+  border-radius: 3px 3px 0 0;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.puzzle-block:hover {
+  box-shadow: 0 6px 16px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.35);
+}
+
+.puzzle-block.dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+}
+
+.puzzle-block.drag-over {
+  border-top: 3px dashed #38bdf8 !important;
+  padding-top: 14px;
+}
+
+/* 執行中積木高亮動畫 */
+.puzzle-block.block-active-running {
+  box-shadow: 0 0 0 3px #fde047, 0 0 26px rgba(250, 204, 21, 0.85) !important;
+  transform: translateX(4px);
+  z-index: 3;
+}
+
+.puzzle-step-badge {
+  background: rgba(0,0,0,0.35);
+  color: rgba(255,255,255,0.9);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  min-width: 28px;
+  text-align: center;
+}
+
+/* 積木內嵌輸入框與下拉選單 */
+.puzzle-input, .puzzle-select {
+  background: rgba(5, 10, 20, 0.72) !important;
+  color: #f8fafc !important;
+  border: 1px solid rgba(255,255,255,0.32) !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  height: 30px;
+}
+
+.puzzle-input:focus, .puzzle-select:focus {
+  border-color: #fde047 !important;
+  box-shadow: 0 0 0 2px rgba(253, 224, 71, 0.35) !important;
+}
+
+.puzzle-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.puzzle-act-btn {
+  background: rgba(0,0,0,0.32);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #f1f5f9;
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.puzzle-act-btn:hover {
+  background: rgba(255,255,255,0.22);
+  color: #fff;
+}
+
+.puzzle-act-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: #fca5a5;
+}
+

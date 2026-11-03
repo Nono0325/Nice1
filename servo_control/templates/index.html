@@ -455,9 +455,9 @@
         <table class="diag-table">
           <thead><tr><th>裝置 / 信號</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
-            <tr><td>圓形電磁鐵吸盤 LSD-P25/20 (吸力8KG, DC 5V/6V/12V/24V)</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
-            <tr><td>手臂金屬檢測霍爾感測器</td><td>GPIO 6</td><td><span class="tag" id="mon-metal">未吸附</span></td></tr>
-            <tr><td>衝壓模具完成回授 (PRESS_DONE)</td><td>GPIO 5</td><td><span class="tag" id="mon-press">就緒</span></td></tr>
+            <tr><td>圓形電磁鐵 LSD-P25/20 (經 JQC-3FF-S-Z 光耦繼電器驅動)</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
+            <tr><td>手臂金屬檢測霍爾開關 (經 817 光耦電壓隔離板轉接)</td><td>GPIO 6</td><td><span class="tag" id="mon-metal">未吸附</span></td></tr>
+            <tr><td>衝壓模具完成回授 (PRESS_DONE / 817 光耦隔離)</td><td>GPIO 5</td><td><span class="tag" id="mon-press">就緒</span></td></tr>
           </tbody>
         </table>
       </div>
@@ -848,8 +848,8 @@
         <div class="pin-item"><span class="pin-number">GPIO 13</span><span class="pin-name">Z_PUL 步進脈衝 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 19</span><span class="pin-name">Z_DIR 步進方向 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 26</span><span class="pin-name">Z_ENA 步進致能 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET 圓形電磁鐵 (LSD-P25/20)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 6</span><span class="pin-name">手臂金屬檢測霍爾開關 (DI)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET 電磁鐵 (LSD-P25/20 + JQC-3FF-S-Z 繼電器)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 6</span><span class="pin-name">手臂金屬霍爾開關 (817 光耦電壓隔離板 DI)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 5</span><span class="pin-name">衝壓機完成訊號 (PRESS_DONE)</span><div class="pin-dot" style="background:var(--accent-cyan)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 17</span><span class="pin-name">X-a點 歸零接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 25</span><span class="pin-name">X-b點 中間模具接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>

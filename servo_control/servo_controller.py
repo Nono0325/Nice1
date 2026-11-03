@@ -13,10 +13,10 @@ Raspberry Pi Stepper Motor & Electromagnet Controller
    - d 點 (向上歸零/安全高度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 22)
    - e 點 (向下極限/取放深度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 23)
 3. 末端手臂:
-   - 圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, Ø25×20mm, 直流 DC 5V/6V/12V/24V，繼電器驅動 GPIO 24)
-   - 金屬吸附檢測霍爾感測器 (GPIO 6，檢測是否確實吸起金屬工件)
+   - 圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, Ø25×20mm, 經 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動 GPIO 24)
+   - 金屬吸附檢測霍爾感測器 (經 817 光耦電壓隔離板 / PC817 轉接模組輸入 GPIO 6，檢測是否確實吸起金屬工件)
 4. 模具衝壓交握:
-   - 衝壓機衝壓完成回授訊號 (GPIO 5，光耦隔離輸入)
+   - 衝壓機衝壓完成回授訊號 (GPIO 5，817 光耦電壓隔離板輸入)
 """
 
 import os
@@ -68,12 +68,12 @@ PIN = {
     'Y_DIR':          19,
     'Y_ENA':          26,
 
-    # 圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, 直流 DC 5V/6V/12V/24V 繼電器驅動)
+    # 圓形電磁鐵強吸力吸盤 LSD-P25/20 (經 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動，H/L跳線設為H高電平觸發)
     'MAGNET':         24,   # 電磁鐵繼電器輸出 (Row 2 - IO24)
     'VACUUM':         24,   # 向下相容別名
     'Z_DOWN':         25,   # 保留舊手臂繼電器標籤兼容
 
-    # 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (金屬感應導通至 GND -> 樹莓派內部上拉 PUD_UP 讀取為 LOW)
+    # 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (經 817 光耦電壓隔離板轉接 -> 樹莓派內部上拉 PUD_UP 讀取為 LOW)
     'LIM_X_A':        17,   # a 點: X 軸歸零/左極限 (Row 1 - IO17)
     'LIM_X_B':        25,   # b 點: X 軸中間模具工位 (Row 2 - IO25) [新增接近開關]
     'LIM_X_C':        27,   # c 點: X 軸向右極限 (Row 4 - IO27)
@@ -87,8 +87,8 @@ PIN = {
     'LIM_UP':         22,
     'LIM_DOWN':       23,
 
-    # 手臂金屬檢測霍爾感測器 [新增]
-    'HALL_ARM_METAL': 6,    # 手臂霍爾感測 (Pin 31 - IO6) 檢測工件是否被電磁鐵吸住
+    # 手臂金屬檢測霍爾感測器 (搭配 817 光耦電壓隔離板 / PC817 電壓控制轉接模組 2/4/8路)
+    'HALL_ARM_METAL': 6,    # 手臂霍爾感測 (Pin 31 - IO6) 經 817 光耦隔離檢測工件是否被電磁鐵吸住
     'PRESS_DONE':     5,    # 衝壓模具衝壓完成回授訊號 (Pin 29 - IO5)
 }
 
@@ -1739,7 +1739,7 @@ def api_diagnose():
             'Y2': {'pin': PIN['Y_PUL'], 'pulse': state['y2_pulse'], 'duty': round(pulse_to_duty(state['y2_pulse']), 3)},
         },
         'digital_outputs': {
-            'MAGNET': {'pin': PIN['MAGNET'], 'state': state['magnet'], 'model': 'LSD-P25/20', 'desc': '圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力8KG, DC 5V/6V/12V/24V)'},
+            'MAGNET': {'pin': PIN['MAGNET'], 'state': state['magnet'], 'model': 'LSD-P25/20', 'relay': 'TONGLING JQC-3FF-S-Z 5VDC (1路光耦隔離繼電器)', 'desc': '圓形電磁鐵 LSD-P25/20 + JQC-3FF-S-Z 繼電器'},
             'VACUUM': {'pin': PIN['VACUUM'], 'state': state['vacuum']},
             'Z_DOWN': {'pin': PIN.get('Z_DOWN', 25), 'state': state['z_down']},
         },
@@ -1752,7 +1752,8 @@ def api_diagnose():
             'Z_E': {'pin': PIN['LIM_Z_E'], 'name': 'Z軸e點(向下極限)', 'triggered': state.get('lim_z_e')},
         },
         'hall_sensors': {
-            'ARM_METAL': {'pin': PIN['HALL_ARM_METAL'], 'name': '手臂金屬檢測霍爾', 'triggered': state.get('hall_arm_metal')},
+            'optocoupler': '817 光耦電壓隔離板 (PC817 電壓控制轉接模組)',
+            'ARM_METAL': {'pin': PIN['HALL_ARM_METAL'], 'name': '手臂金屬檢測霍爾 (817光耦隔離)', 'triggered': state.get('hall_arm_metal')},
         },
         'limit_switches': {
             'LEFT':  {'pin': PIN['LIM_LEFT'],  'triggered': state['lim_left']},

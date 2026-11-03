@@ -11,7 +11,8 @@ let state = {
   x_pulse: 1500, z_pulse: 1500, y1_pulse: 1500, y2_pulse: 1500,
   x_mm: 100.0, z_mm: 100.0, y_mm: 100.0,
   x_pct: 50, z_pct: 50, y_pct: 50,
-  magnet: false, vacuum: false, z_down: false,
+  magnet: false, magnet_1: false, magnet_2: false, magnet_3: false, magnet_4: false, magnet_active_count: 0,
+  vacuum: false, z_down: false,
   system_run: false, arm_down: false,
   pickup_active: false, error: false, error_msg: '',
   lim_x_a: false, lim_x_b: false, lim_x_c: false, lim_z_d: false, lim_z_e: false,
@@ -330,6 +331,12 @@ function updateUI() {
   setLamp('lamp-pickup',   s.pickup_active ? 'amber' : 'off');
   setLamp('lamp-armdown',  s.arm_down      ? 'amber' : 'off');
   setLamp('lamp-vacuum',   (s.magnet || s.vacuum) ? 'amber' : 'off');
+  for (let g = 1; g <= 4; g++) {
+    const mOn = s[`magnet_${g}`] !== undefined ? s[`magnet_${g}`] : (s.magnet || s.vacuum);
+    setLamp(`lamp-mag-${g}`, mOn ? 'amber' : 'off');
+    const mBtn = document.getElementById(`btnMag${g}`);
+    if (mBtn) mBtn.classList.toggle('active', !!mOn);
+  }
   setLamp('lamp-metal',    (s.hall_arm_metal || s.hall_metal) ? 'green' : 'off');
   setLamp('lamp-hall-g1',  s.hall_group_1 ? 'green' : ((s.hall_1 || s.hall_2) ? 'amber' : 'off'));
   setLamp('lamp-hall-g2',  s.hall_group_2 ? 'green' : ((s.hall_3 || s.hall_4) ? 'amber' : 'off'));
@@ -412,11 +419,16 @@ function updateUI() {
   setEl('gaugeY1Val', el => el.textContent = `${zPulse} µs`);
   setEl('gaugeY2Val', el => el.textContent = `${zPulse} µs`);
 
-  // 監控 Tab - 數位 I/O 與 QN-1805-E1 接近開關 & 8顆末端霍爾(兩個一組共4組)
+  // 監控 Tab - 數位 I/O 與 QN-1805-E1 接近開關 & 4組電磁鐵 & 8顆末端霍爾(兩個一組共4組)
+  const mActCnt = s.magnet_active_count !== undefined ? s.magnet_active_count : ((s.magnet || s.vacuum) ? 4 : 0);
   const hActCnt = s.hall_active_count !== undefined ? s.hall_active_count : ((s.hall_arm_metal || s.hall_metal) ? 8 : 0);
   const hGrpCnt = s.hall_group_count !== undefined ? s.hall_group_count : ((s.hall_arm_metal || s.hall_metal) ? 4 : 0);
-  updateTag('mon-vacuum', (s.magnet || s.vacuum), '🟢 通電 ON', '⚫ 斷電 OFF', 'tag-green', 'tag-red');
+  updateTag('mon-vacuum', (s.magnet || s.vacuum), `🟢 通電 ON (${mActCnt}/4組)`, '⚫ 斷電 OFF (0/4組)', 'tag-green', 'tag-red');
   updateTag('mon-metal', (s.hall_arm_metal || s.hall_metal), `🟢 已吸附 (${hActCnt}/8顆 · ${hGrpCnt}/4組)`, '⚪ 未吸附 (0/8顆)', 'tag-green', 'tag-blue');
+  for (let g = 1; g <= 4; g++) {
+    const mOn = s[`magnet_${g}`] !== undefined ? s[`magnet_${g}`] : (s.magnet || s.vacuum);
+    updateTag(`mon-mag-${g}`, !!mOn, `🟢 通電 ON`, `⚫ OFF`, 'tag-green', 'tag-red');
+  }
   for (let i = 1; i <= 8; i++) {
     updateTag(`mon-hall-${i}`, !!s[`hall_${i}`], `H${i}: 🟢 觸發`, `H${i}: ⚪ OFF`, 'tag-green', 'tag-blue');
   }
@@ -667,9 +679,21 @@ async function toggleVacuum() {
   const r = await apiPost('/api/magnet', { on: nextVal });
   if (r.ok) {
     const isNowOn = r.magnet || r.vacuum;
-    const status = isNowOn ? '🧲 LSD-P25/20 圓形電磁鐵 通電吸料 ON' : '⚪ LSD-P25/20 圓形電磁鐵 斷電釋放 OFF';
+    const status = isNowOn ? '🧲 4組 LSD-P25/20 圓形電磁鐵 (M1~M4) 全部通電吸料 ON' : '⚪ 4組 LSD-P25/20 圓形電磁鐵 (M1~M4) 全部斷電釋放 OFF';
     toast(status, isNowOn ? 'success' : 'info');
     addLog(status, isNowOn ? 'success' : 'info');
+  }
+}
+
+async function toggleMagnetGroup(groupIdx) {
+  const curVal = state[`magnet_${groupIdx}`] !== undefined ? state[`magnet_${groupIdx}`] : state.magnet;
+  const nextVal = !curVal;
+  const r = await apiPost('/api/magnet', { group: groupIdx, on: nextVal });
+  if (r.ok) {
+    const isGroupOn = r[`magnet_${groupIdx}`];
+    const status = isGroupOn ? `🧲 第 ${groupIdx} 組電磁鐵 (M${groupIdx}) 通電吸料 ON` : `⚪ 第 ${groupIdx} 組電磁鐵 (M${groupIdx}) 斷電釋放 OFF`;
+    toast(status, isGroupOn ? 'success' : 'info');
+    addLog(status, isGroupOn ? 'success' : 'info');
   }
 }
 

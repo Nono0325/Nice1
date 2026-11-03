@@ -13,8 +13,8 @@ Raspberry Pi Stepper Motor & Electromagnet Controller
    - d 點 (向上歸零/安全高度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 22)
    - e 點 (向下極限/取放深度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 23)
 3. 末端手臂:
-   - 圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, Ø25×20mm, 經 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動 GPIO 24)
-   - 末端金屬吸附檢測霍爾感測陣列：共 8 顆霍爾開關，兩個一組（共 4 組：G1[H1,H2]、G2[H3,H4]、G3[H5,H6]、G4[H7,H8]），經 8路 817 光耦電壓隔離板 (PC817 轉接模組) 輸入 GPIO 6, 7, 8, 9, 10, 11, 4, 21
+   - 圓形電磁鐵強吸力吸盤 LSD-P25/20 共 4 組 (吸力 8KG, Ø25×20mm, 經 4 組 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動 GPIO 24, 18, 14, 15)
+   - 末端金屬吸附檢測霍爾感測陣列：共 8 顆霍爾開關，兩個一組（共 4 組：G1[H1,H2]、G2[H3,H4]、G3[H5,H6]、G4[H7,H8] 對應 4 組電磁鐵 M1~M4），經 8路 817 光耦電壓隔離板 (PC817 轉接模組) 輸入 GPIO 6, 7, 8, 9, 10, 11, 4, 21
 4. 模具衝壓交握:
    - 衝壓機衝壓完成回授訊號 (GPIO 5，817 光耦電壓隔離板輸入)
 """
@@ -68,8 +68,12 @@ PIN = {
     'Y_DIR':          19,
     'Y_ENA':          26,
 
-    # 圓形電磁鐵強吸力吸盤 LSD-P25/20 (經 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動，H/L跳線設為H高電平觸發)
-    'MAGNET':         24,   # 電磁鐵繼電器輸出 (Row 2 - IO24)
+    # 圓形電磁鐵強吸力吸盤 LSD-P25/20 共 4 組 (經 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動，H/L跳線設為H高電平觸發)
+    'MAGNET_1':       24,   # 第 1 組電磁鐵 M1 (Pin 18 - GPIO 24，對應霍爾 G1: H1+H2)
+    'MAGNET_2':       18,   # 第 2 組電磁鐵 M2 (Pin 12 - GPIO 18，對應霍爾 G2: H3+H4)
+    'MAGNET_3':       14,   # 第 3 組電磁鐵 M3 (Pin 8  - GPIO 14，對應霍爾 G3: H5+H6)
+    'MAGNET_4':       15,   # 第 4 組電磁鐵 M4 (Pin 10 - GPIO 15，對應霍爾 G4: H7+H8)
+    'MAGNET':         24,   # 向下相容主別名 (全組同步或 M1)
     'VACUUM':         24,   # 向下相容別名
     'Z_DOWN':         25,   # 保留舊手臂繼電器標籤兼容
 
@@ -105,6 +109,7 @@ PIN = {
 }
 
 HALL_PIN_KEYS = ['HALL_1', 'HALL_2', 'HALL_3', 'HALL_4', 'HALL_5', 'HALL_6', 'HALL_7', 'HALL_8']
+MAGNET_PIN_KEYS = ['MAGNET_1', 'MAGNET_2', 'MAGNET_3', 'MAGNET_4']
 
 # ── 步進馬達虛擬 PWM 規格 ──────────────────────────────────────────
 PWM_FREQ     = 50       
@@ -136,9 +141,14 @@ state = {
     'z_pct':  50.0,
     'y_pct':  50.0,
 
-    # 數位輸出 (圓形電磁鐵強吸力吸盤 LSD-P25/20)
+    # 數位輸出 (圓形電磁鐵強吸力吸盤 LSD-P25/20 共 4 組)
     'magnet':   False,
-    'vacuum':   False,   # 相容舊版名稱
+    'magnet_1': False,                 # 第 1 組電磁鐵 (M1)
+    'magnet_2': False,                 # 第 2 組電磁鐵 (M2)
+    'magnet_3': False,                 # 第 3 組電磁鐵 (M3)
+    'magnet_4': False,                 # 第 4 組電磁鐵 (M4)
+    'magnet_active_count': 0,          # 通電電磁鐵組數 (0~4)
+    'vacuum':   False,                 # 相容舊版名稱
     'z_down':   False,
 
     # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開）
@@ -409,8 +419,8 @@ def init_gpio():
     if not IS_RASPBERRY_PI:
         return
 
-    # 數位輸出 (圓形電磁鐵 LSD-P25/20 繼電器)
-    for pin_name in ['MAGNET', 'VACUUM']:
+    # 數位輸出 (4 組圓形電磁鐵 LSD-P25/20 + JQC-3FF-S-Z 繼電器)
+    for pin_name in MAGNET_PIN_KEYS:
         GPIO.setup(PIN[pin_name], GPIO.OUT, initial=GPIO.LOW)
 
     # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 + 8顆手臂金屬霍爾感測器(兩個一組) + 衝壓完成訊號）
@@ -462,19 +472,37 @@ def set_servo_pulse(axis, pulse_us):
             st.set_target(pulse_us, z_min, z_max)
 
 def set_digital_output(name, value):
-    """設定數位輸出 (圓形電磁鐵吸盤 / 手臂)，含電磁鐵超時計時器防過熱保護"""
+    """設定數位輸出 (4 組圓形電磁鐵吸盤 M1~M4 / 手臂)，含電磁鐵超時計時器防過熱保護"""
     name = name.lower()
-    if name in ('magnet', 'vacuum'):
-        val_bool = bool(value)
+    val_bool = bool(value)
+    if name in ('magnet', 'vacuum', 'magnet_all'):
+        for g in range(1, 5):
+            state[f'magnet_{g}'] = val_bool
+            if IS_RASPBERRY_PI:
+                GPIO.output(PIN[f'MAGNET_{g}'], GPIO.HIGH if val_bool else GPIO.LOW)
+        state['magnet_active_count'] = 4 if val_bool else 0
         state['magnet'] = val_bool
         state['vacuum'] = val_bool
         state['magnet_on_time'] = time.time() if val_bool else 0.0
+
+    elif name in ('magnet_1', 'magnet_2', 'magnet_3', 'magnet_4'):
+        g = int(name.split('_')[1])
+        state[f'magnet_{g}'] = val_bool
         if IS_RASPBERRY_PI:
-            GPIO.output(PIN['MAGNET'], GPIO.HIGH if val_bool else GPIO.LOW)
+            GPIO.output(PIN[f'MAGNET_{g}'], GPIO.HIGH if val_bool else GPIO.LOW)
+        active_cnt = sum(1 for i in range(1, 5) if state.get(f'magnet_{i}'))
+        state['magnet_active_count'] = active_cnt
+        any_on = active_cnt > 0
+        if any_on and not state.get('magnet'):
+            state['magnet_on_time'] = time.time()
+        elif not any_on:
+            state['magnet_on_time'] = 0.0
+        state['magnet'] = any_on
+        state['vacuum'] = any_on
 
     elif name == 'z_down':
-        state['z_down'] = bool(value)
-        state['arm_down'] = bool(value)
+        state['z_down'] = val_bool
+        state['arm_down'] = val_bool
 
 def read_limit_switches():
     """讀取所有電感式接近開關 (QN-1805-E1) 與 8 顆末端金屬霍爾感測器 (兩個一組共 4 組，具備 3-Sample 工業數位防彈跳濾波)"""
@@ -516,9 +544,11 @@ def read_limit_switches():
             z_max = state.get('z_max', state['y_max'])
             state['lim_z_e'] = st_z.current_pos <= z_min + 5
             state['lim_z_d'] = st_z.current_pos >= z_max - 5
-        mag_active = state.get('magnet', False) # 磁鐵吸附時模擬 8 顆霍爾(4組)感測到金屬
-        for idx in range(1, 9):
-            state[f'hall_{idx}'] = mag_active
+        # 模擬模式：4 組電磁鐵 (M1~M4) 分別對應模擬 4 組霍爾開關 (G1: H1+H2, G2: H3+H4, G3: H5+H6, G4: H7+H8)
+        for g in range(1, 5):
+            g_mag = bool(state.get(f'magnet_{g}', state.get('magnet', False)))
+            state[f'hall_{g*2 - 1}'] = g_mag
+            state[f'hall_{g*2}']     = g_mag
         state['press_done'] = True
 
     # 計算 8 顆霍爾開關「兩個一組」(共 4 組) 狀態：同組兩顆皆觸發 (或組內觸發)
@@ -1202,10 +1232,16 @@ def run_macro_loop(commands):
                 add_history("巨集錯誤: DELAY 指令參數不足", "error")
                 
         elif op in ('MAGNET', 'VACUUM'):
-            if len(parts) >= 2:
+            if len(parts) >= 3 and parts[1].isdigit() and int(parts[1]) in (1, 2, 3, 4):
+                g = int(parts[1])
+                val = parts[2].upper() == 'ON'
+                set_digital_output(f'magnet_{g}', val)
+                add_history(f"巨集指令: 第 {g} 組電磁鐵 (M{g}) {'通電 ON' if val else '斷電 OFF'}", "info")
+                time.sleep(0.4)
+            elif len(parts) >= 2:
                 val = parts[1].upper() == 'ON'
                 set_digital_output('magnet', val)
-                add_history(f"巨集指令: 電磁鐵吸盤 {'通電 ON' if val else '斷電 OFF'}", "info")
+                add_history(f"巨集指令: 4組電磁鐵吸盤 (M1~M4) {'全部通電 ON' if val else '全部斷電 OFF'}", "info")
                 time.sleep(0.4)
             else:
                 add_history(f"巨集錯誤: {op} 指令參數不足", "error")
@@ -1312,12 +1348,27 @@ def api_home():
 @app.route('/api/magnet', methods=['POST'])
 @app.route('/api/vacuum', methods=['POST'])
 def api_magnet():
-    """控制圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, DC 5V/6V/12V/24V 繼電器驅動)"""
+    """控制 4 組圓形電磁鐵強吸力吸盤 LSD-P25/20 (支援全組同步或單組 M1~M4 獨立控制)"""
     data = request.get_json(silent=True) or {}
+    group = data.get('group')
     value = bool(data.get('on', False))
-    set_digital_output('magnet', value)
-    add_history(f"手動切換電磁鐵吸盤: {'通電吸附 ON' if value else '斷電釋放 OFF'}", "info")
-    return jsonify({'ok': True, 'magnet': state['magnet'], 'vacuum': state['vacuum']})
+    if group in (1, 2, 3, 4, '1', '2', '3', '4'):
+        g = int(group)
+        set_digital_output(f'magnet_{g}', value)
+        add_history(f"手動切換第 {g} 組電磁鐵 (M{g}): {'通電吸附 ON' if value else '斷電釋放 OFF'}", "info")
+    else:
+        set_digital_output('magnet', value)
+        add_history(f"手動切換全部 4 組電磁鐵 (M1~M4): {'通電吸附 ON' if value else '斷電釋放 OFF'}", "info")
+    return jsonify({
+        'ok': True,
+        'magnet': state['magnet'],
+        'magnet_1': state['magnet_1'],
+        'magnet_2': state['magnet_2'],
+        'magnet_3': state['magnet_3'],
+        'magnet_4': state['magnet_4'],
+        'magnet_active_count': state['magnet_active_count'],
+        'vacuum': state['vacuum']
+    })
 
 @app.route('/api/z_down', methods=['POST'])
 def api_z_down():
@@ -1779,7 +1830,11 @@ def api_diagnose():
             'Y2': {'pin': PIN['Y_PUL'], 'pulse': state['y2_pulse'], 'duty': round(pulse_to_duty(state['y2_pulse']), 3)},
         },
         'digital_outputs': {
-            'MAGNET': {'pin': PIN['MAGNET'], 'state': state['magnet'], 'model': 'LSD-P25/20', 'relay': 'TONGLING JQC-3FF-S-Z 5VDC (1路光耦隔離繼電器)', 'desc': '圓形電磁鐵 LSD-P25/20 + JQC-3FF-S-Z 繼電器'},
+            'MAGNET': {'pin': PIN['MAGNET'], 'state': state['magnet'], 'active_count': state.get('magnet_active_count', 0), 'model': 'LSD-P25/20 (4組)', 'relay': 'TONGLING JQC-3FF-S-Z 5VDC (光耦隔離繼電器 × 4組)', 'desc': '4 組圓形電磁鐵 LSD-P25/20 + JQC-3FF-S-Z 繼電器'},
+            'MAGNET_1': {'pin': PIN['MAGNET_1'], 'state': state.get('magnet_1', False), 'name': '第1組電磁鐵 M1 (對應霍爾G1)'},
+            'MAGNET_2': {'pin': PIN['MAGNET_2'], 'state': state.get('magnet_2', False), 'name': '第2組電磁鐵 M2 (對應霍爾G2)'},
+            'MAGNET_3': {'pin': PIN['MAGNET_3'], 'state': state.get('magnet_3', False), 'name': '第3組電磁鐵 M3 (對應霍爾G3)'},
+            'MAGNET_4': {'pin': PIN['MAGNET_4'], 'state': state.get('magnet_4', False), 'name': '第4組電磁鐵 M4 (對應霍爾G4)'},
             'VACUUM': {'pin': PIN['VACUUM'], 'state': state['vacuum']},
             'Z_DOWN': {'pin': PIN.get('Z_DOWN', 25), 'state': state['z_down']},
         },

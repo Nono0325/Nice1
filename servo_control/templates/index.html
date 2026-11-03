@@ -150,8 +150,17 @@
           <div class="indicator-lamp off" id="lamp-pickup"></div>
         </div>
         <div class="indicator-group">
-          <div class="indicator-label">電磁鐵吸盤</div>
-          <div class="indicator-lamp off" id="lamp-vacuum" title="LSD-P25/20 圓形強力電磁鐵 (8KG) + JQC-3FF-S-Z 繼電器"></div>
+          <div class="indicator-label">電磁鐵(4組)</div>
+          <div class="indicator-lamp off" id="lamp-vacuum" title="4 組 LSD-P25/20 圓形強力電磁鐵 (M1~M4) + JQC-3FF-S-Z 繼電器"></div>
+        </div>
+        <div class="indicator-group">
+          <div class="indicator-label">磁鐵 M1~M4</div>
+          <div style="display:flex;gap:4px;align-items:center;height:28px">
+            <div class="indicator-lamp off" id="lamp-mag-1" title="第1組電磁鐵 M1 (GPIO 24)" style="width:14px;height:14px"></div>
+            <div class="indicator-lamp off" id="lamp-mag-2" title="第2組電磁鐵 M2 (GPIO 18)" style="width:14px;height:14px"></div>
+            <div class="indicator-lamp off" id="lamp-mag-3" title="第3組電磁鐵 M3 (GPIO 14)" style="width:14px;height:14px"></div>
+            <div class="indicator-lamp off" id="lamp-mag-4" title="第4組電磁鐵 M4 (GPIO 15)" style="width:14px;height:14px"></div>
+          </div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">金屬總檢(8顆)</div>
@@ -333,10 +342,18 @@
       <div class="card-title"><span class="icon">🤖</span>致動器與衝壓自動化控制</div>
       <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
 
-        <!-- 圓形電磁鐵強吸力吸盤控制 -->
+        <!-- 圓形電磁鐵強吸力吸盤控制 (4組總控 + M1~M4 獨立切換) -->
         <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-          <span style="font-size:13px;font-weight:600;color:var(--accent-amber)">電磁鐵吸盤 (LSD-P25/20)</span>
-          <button class="btn-amber-toggle" id="btnVacuum" onclick="toggleVacuum()" title="LSD-P25/20 電磁鐵通電/斷電"></button>
+          <span style="font-size:13px;font-weight:600;color:var(--accent-amber)">電磁鐵總控 (4組 LSD-P25/20)</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn-amber-toggle" id="btnVacuum" onclick="toggleVacuum()" title="全4組 LSD-P25/20 電磁鐵同步通電/斷電"></button>
+            <div style="display:flex;gap:4px">
+              <button class="step-chip" id="btnMag1" onclick="toggleMagnetGroup(1)" title="切換第1組電磁鐵 M1 (GPIO 24)">M1</button>
+              <button class="step-chip" id="btnMag2" onclick="toggleMagnetGroup(2)" title="切換第2組電磁鐵 M2 (GPIO 18)">M2</button>
+              <button class="step-chip" id="btnMag3" onclick="toggleMagnetGroup(3)" title="切換第3組電磁鐵 M3 (GPIO 14)">M3</button>
+              <button class="step-chip" id="btnMag4" onclick="toggleMagnetGroup(4)" title="切換第4組電磁鐵 M4 (GPIO 15)">M4</button>
+            </div>
+          </div>
         </div>
 
         <!-- 馬達致能鎖定控制 -->
@@ -471,7 +488,7 @@
         <table class="diag-table">
           <thead><tr><th>裝置 / 信號</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
-            <tr><td>圓形電磁鐵 LSD-P25/20 (經 JQC-3FF-S-Z 光耦繼電器驅動)</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
+            <tr><td>圓形電磁鐵 LSD-P25/20 × 4組 (經 4組 JQC-3FF-S-Z 光耦繼電器驅動)</td><td>GPIO 24/18/14/15</td><td><span class="tag" id="mon-vacuum">OFF (0/4組)</span></td></tr>
             <tr><td>末端金屬霍爾總狀態 (8顆 / 兩個一組共4組 / 817光耦)</td><td>8路輸入</td><td><span class="tag" id="mon-metal">未吸附 (0/8)</span></td></tr>
             <tr><td>衝壓模具完成回授 (PRESS_DONE / 817 光耦隔離)</td><td>GPIO 5</td><td><span class="tag" id="mon-press">就緒</span></td></tr>
           </tbody>
@@ -492,45 +509,45 @@
       </div>
     </div>
 
-    <!-- 末端金屬檢測霍爾感測陣列 (8顆 / 兩個一組共4組) -->
+    <!-- 4組電磁鐵 (M1~M4) 與 8顆末端金屬檢測霍爾感測陣列 (兩個一組共4組) -->
     <div class="card" style="margin-bottom:16px">
-      <div class="card-title"><span class="icon">🧲</span>末端金屬檢測霍爾陣列（8 顆 / 兩個一組共 4 組，搭配 8路 817 光耦電壓隔離板）</div>
+      <div class="card-title"><span class="icon">🧲</span>4 組圓形電磁鐵 (LSD-P25/20 + JQC-3FF-S-Z) 與 8 顆末端金屬霍爾陣列（兩個一組共 4 組，搭配 8路 817 光耦電壓隔離板）</div>
       <table class="diag-table">
         <thead>
           <tr>
-            <th>分組 (兩個一組)</th>
-            <th>感測器 A (GPIO)</th>
-            <th>感測器 B (GPIO)</th>
-            <th>單顆狀態 (A / B)</th>
-            <th>分組判定狀態</th>
+            <th>分組 (電磁鐵 + 雙霍爾)</th>
+            <th>電磁鐵輸出 (LSD-P25/20)</th>
+            <th>霍爾 A / B (817 光耦輸入)</th>
+            <th>單顆霍爾狀態 (A / B)</th>
+            <th>分組金屬判定</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>第 1 組 (Group 1)</strong></td>
-            <td>HALL_1 (GPIO 6 / Pin 31)</td>
-            <td>HALL_2 (GPIO 7 / Pin 26)</td>
+            <td>M1 (GPIO 24 / Pin 18) &nbsp;<span class="tag" id="mon-mag-1">OFF</span></td>
+            <td>HALL_1 (GPIO 6) / HALL_2 (GPIO 7)</td>
             <td><span class="tag" id="mon-hall-1">H1: OFF</span> &nbsp; <span class="tag" id="mon-hall-2">H2: OFF</span></td>
             <td><span class="tag" id="mon-hall-g1">⚪ 未觸發</span></td>
           </tr>
           <tr>
             <td><strong>第 2 組 (Group 2)</strong></td>
-            <td>HALL_3 (GPIO 8 / Pin 24)</td>
-            <td>HALL_4 (GPIO 9 / Pin 21)</td>
+            <td>M2 (GPIO 18 / Pin 12) &nbsp;<span class="tag" id="mon-mag-2">OFF</span></td>
+            <td>HALL_3 (GPIO 8) / HALL_4 (GPIO 9)</td>
             <td><span class="tag" id="mon-hall-3">H3: OFF</span> &nbsp; <span class="tag" id="mon-hall-4">H4: OFF</span></td>
             <td><span class="tag" id="mon-hall-g2">⚪ 未觸發</span></td>
           </tr>
           <tr>
             <td><strong>第 3 組 (Group 3)</strong></td>
-            <td>HALL_5 (GPIO 10 / Pin 19)</td>
-            <td>HALL_6 (GPIO 11 / Pin 23)</td>
+            <td>M3 (GPIO 14 / Pin 8) &nbsp;<span class="tag" id="mon-mag-3">OFF</span></td>
+            <td>HALL_5 (GPIO 10) / HALL_6 (GPIO 11)</td>
             <td><span class="tag" id="mon-hall-5">H5: OFF</span> &nbsp; <span class="tag" id="mon-hall-6">H6: OFF</span></td>
             <td><span class="tag" id="mon-hall-g3">⚪ 未觸發</span></td>
           </tr>
           <tr>
             <td><strong>第 4 組 (Group 4)</strong></td>
-            <td>HALL_7 (GPIO 4 / Pin 7)</td>
-            <td>HALL_8 (GPIO 21 / Pin 40)</td>
+            <td>M4 (GPIO 15 / Pin 10) &nbsp;<span class="tag" id="mon-mag-4">OFF</span></td>
+            <td>HALL_7 (GPIO 4) / HALL_8 (GPIO 21)</td>
             <td><span class="tag" id="mon-hall-7">H7: OFF</span> &nbsp; <span class="tag" id="mon-hall-8">H8: OFF</span></td>
             <td><span class="tag" id="mon-hall-g4">⚪ 未觸發</span></td>
           </tr>
@@ -910,7 +927,10 @@
         <div class="pin-item"><span class="pin-number">GPIO 13</span><span class="pin-name">Z_PUL 步進脈衝 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 19</span><span class="pin-name">Z_DIR 步進方向 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 26</span><span class="pin-name">Z_ENA 步進致能 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET 電磁鐵 (LSD-P25/20 + JQC-3FF-S-Z 繼電器)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET_1 第1組電磁鐵 M1 (LSD-P25/20 + JQC-3FF-S-Z)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 18</span><span class="pin-name">MAGNET_2 第2組電磁鐵 M2 (LSD-P25/20 + JQC-3FF-S-Z)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 14</span><span class="pin-name">MAGNET_3 第3組電磁鐵 M3 (LSD-P25/20 + JQC-3FF-S-Z)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 15</span><span class="pin-name">MAGNET_4 第4組電磁鐵 M4 (LSD-P25/20 + JQC-3FF-S-Z)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 6 / 7</span><span class="pin-name">末端霍爾第1組 G1 (HALL_1 + HALL_2, 817光耦)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 8 / 9</span><span class="pin-name">末端霍爾第2組 G2 (HALL_3 + HALL_4, 817光耦)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 10 / 11</span><span class="pin-name">末端霍爾第3組 G3 (HALL_5 + HALL_6, 817光耦)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>

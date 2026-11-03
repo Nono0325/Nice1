@@ -110,12 +110,21 @@ function init3D() {
   zArm.castShadow = true;
   sliderY.add(zArm);
 
-  // 5.4. 吸嘴末端圓形強力電磁鐵 (Circular Electromagnet LSD-P25/20 8KG DC 5V/6V/12V/24V)
-  const cupGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.35, 32);
-  const cupMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.95, roughness: 0.15 });
-  const cup = new THREE.Mesh(cupGeo, cupMat);
-  cup.position.y = -1.6; // 位於 Z-arm 最底部
-  zArm.add(cup);
+  // 5.4. 吸嘴末端 4 組圓形強力電磁鐵陣列 (4x Circular Electromagnets LSD-P25/20 8KG)
+  const plateGeo = new THREE.BoxGeometry(1.5, 0.14, 1.5);
+  const plateMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.85, roughness: 0.2 });
+  const headPlate = new THREE.Mesh(plateGeo, plateMat);
+  headPlate.position.y = -1.45;
+  zArm.add(headPlate);
+
+  const cupGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.32, 24);
+  const cupMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.95, roughness: 0.15 });
+  const magOffsets = [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]];
+  magOffsets.forEach(([ox, oz]) => {
+    const c = new THREE.Mesh(cupGeo, cupMat);
+    c.position.set(ox, -1.62, oz);
+    zArm.add(c);
+  });
 
   // 5.5. 電磁鐵通電/磁力指示光圈
   const ringGeo = new THREE.TorusGeometry(0.42, 0.05, 8, 24);

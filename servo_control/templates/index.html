@@ -151,7 +151,7 @@
         </div>
         <div class="indicator-group">
           <div class="indicator-label">電磁鐵吸盤</div>
-          <div class="indicator-lamp off" id="lamp-vacuum"></div>
+          <div class="indicator-lamp off" id="lamp-vacuum" title="LSD-P25/20 圓形強力電磁鐵 (8KG)"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">手臂金屬霍爾</div>
@@ -159,23 +159,23 @@
         </div>
         <div class="indicator-group">
           <div class="indicator-label">X-a(歸零)</div>
-          <div class="indicator-lamp off" id="lamp-limleft" title="HN-1805-E1 a點歸零接近開關"></div>
+          <div class="indicator-lamp off" id="lamp-limleft" title="QN-1805-E1 a點歸零接近開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">X-b(中間)</div>
-          <div class="indicator-lamp off" id="lamp-limmid" title="HN-1805-E1 b點中間模具接近開關"></div>
+          <div class="indicator-lamp off" id="lamp-limmid" title="QN-1805-E1 b點中間模具接近開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">X-c(右極限)</div>
-          <div class="indicator-lamp off" id="lamp-limright" title="HN-1805-E1 c點右極限接近開關"></div>
+          <div class="indicator-lamp off" id="lamp-limright" title="QN-1805-E1 c點右極限接近開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">Z-d(上歸零)</div>
-          <div class="indicator-lamp off" id="lamp-limup" title="HN-1805-E1 d點向上歸零接近開關"></div>
+          <div class="indicator-lamp off" id="lamp-limup" title="QN-1805-E1 d點向上歸零接近開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">Z-e(下極限)</div>
-          <div class="indicator-lamp off" id="lamp-limdown" title="HN-1805-E1 e點向下極限接近開關"></div>
+          <div class="indicator-lamp off" id="lamp-limdown" title="QN-1805-E1 e點向下極限接近開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">Error</div>
@@ -319,8 +319,8 @@
 
         <!-- 圓形電磁鐵強吸力吸盤控制 -->
         <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
-          <span style="font-size:13px;font-weight:600;color:var(--accent-amber)">圓形電磁鐵吸盤</span>
-          <button class="btn-amber-toggle" id="btnVacuum" onclick="toggleVacuum()" title="電磁鐵通電/斷電"></button>
+          <span style="font-size:13px;font-weight:600;color:var(--accent-amber)">電磁鐵吸盤 (LSD-P25/20)</span>
+          <button class="btn-amber-toggle" id="btnVacuum" onclick="toggleVacuum()" title="LSD-P25/20 電磁鐵通電/斷電"></button>
         </div>
 
         <!-- 馬達致能鎖定控制 -->
@@ -455,14 +455,14 @@
         <table class="diag-table">
           <thead><tr><th>裝置 / 信號</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
-            <tr><td>圓形電磁鐵強吸力吸盤 (DC 12V/24V)</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
+            <tr><td>圓形電磁鐵吸盤 LSD-P25/20 (吸力8KG, DC 5V/6V/12V/24V)</td><td>GPIO 24</td><td><span class="tag" id="mon-vacuum">OFF</span></td></tr>
             <tr><td>手臂金屬檢測霍爾感測器</td><td>GPIO 6</td><td><span class="tag" id="mon-metal">未吸附</span></td></tr>
             <tr><td>衝壓模具完成回授 (PRESS_DONE)</td><td>GPIO 5</td><td><span class="tag" id="mon-press">就緒</span></td></tr>
           </tbody>
         </table>
       </div>
       <div class="card">
-        <div class="card-title"><span class="icon">🔒</span>電感式接近開關 (HN-1805-E1 24V NPN 常開)</div>
+        <div class="card-title"><span class="icon">🔒</span>電感式接近開關 (QN-1805-E1 DC10-30V 三線 NPN 常開)</div>
         <table class="diag-table">
           <thead><tr><th>開關位置 (工位)</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
@@ -848,14 +848,14 @@
         <div class="pin-item"><span class="pin-number">GPIO 13</span><span class="pin-name">Z_PUL 步進脈衝 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 19</span><span class="pin-name">Z_DIR 步進方向 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 26</span><span class="pin-name">Z_ENA 步進致能 (升降)</span><div class="pin-dot" style="background:var(--accent-green)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET 圓形電磁鐵繼電器</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 24</span><span class="pin-name">MAGNET 圓形電磁鐵 (LSD-P25/20)</span><div class="pin-dot" style="background:var(--accent-amber)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 6</span><span class="pin-name">手臂金屬檢測霍爾開關 (DI)</span><div class="pin-dot" style="background:var(--accent-purple)"></div></div>
         <div class="pin-item"><span class="pin-number">GPIO 5</span><span class="pin-name">衝壓機完成訊號 (PRESS_DONE)</span><div class="pin-dot" style="background:var(--accent-cyan)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 17</span><span class="pin-name">X-a點 歸零接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 25</span><span class="pin-name">X-b點 中間模具接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 27</span><span class="pin-name">X-c點 右極限接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 22</span><span class="pin-name">Z-d點 上歸零接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
-        <div class="pin-item"><span class="pin-number">GPIO 23</span><span class="pin-name">Z-e點 下極限接近開關 (HN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 17</span><span class="pin-name">X-a點 歸零接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 25</span><span class="pin-name">X-b點 中間模具接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 27</span><span class="pin-name">X-c點 右極限接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 22</span><span class="pin-name">Z-d點 上歸零接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
+        <div class="pin-item"><span class="pin-number">GPIO 23</span><span class="pin-name">Z-e點 下極限接近開關 (QN-1805-E1)</span><div class="pin-dot" style="background:var(--accent-red)"></div></div>
       </div>
     </div>
   </div>

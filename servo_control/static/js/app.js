@@ -404,7 +404,7 @@ function updateUI() {
   setEl('gaugeY1Val', el => el.textContent = `${zPulse} µs`);
   setEl('gaugeY2Val', el => el.textContent = `${zPulse} µs`);
 
-  // 監控 Tab - 數位 I/O 與 HN-1805-E1 接近開關
+  // 監控 Tab - 數位 I/O 與 QN-1805-E1 接近開關
   updateTag('mon-vacuum', (s.magnet || s.vacuum), '🟢 通電 ON', '⚫ 斷電 OFF', 'tag-green', 'tag-red');
   updateTag('mon-metal', (s.hall_arm_metal || s.hall_metal), '🟢 已吸附金屬', '⚪ 未吸附', 'tag-green', 'tag-blue');
   updateTag('mon-press', (s.press_done !== undefined ? s.press_done : true), '🟢 完成', '⏳ 等待中', 'tag-green', 'tag-amber');
@@ -636,7 +636,7 @@ async function toggleVacuum() {
   const r = await apiPost('/api/magnet', { on: nextVal });
   if (r.ok) {
     const isNowOn = r.magnet || r.vacuum;
-    const status = isNowOn ? '🧲 圓形電磁鐵 通電吸料 ON' : '⚪ 圓形電磁鐵 斷電釋放 OFF';
+    const status = isNowOn ? '🧲 LSD-P25/20 圓形電磁鐵 通電吸料 ON' : '⚪ LSD-P25/20 圓形電磁鐵 斷電釋放 OFF';
     toast(status, isNowOn ? 'success' : 'info');
     addLog(status, isNowOn ? 'success' : 'info');
   }

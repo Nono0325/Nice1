@@ -110,7 +110,7 @@ function init3D() {
   zArm.castShadow = true;
   sliderY.add(zArm);
 
-  // 5.4. 吸嘴末端圓形強力電磁鐵 (Circular Electromagnet DC 5V/6V/12V/24V)
+  // 5.4. 吸嘴末端圓形強力電磁鐵 (Circular Electromagnet LSD-P25/20 8KG DC 5V/6V/12V/24V)
   const cupGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.35, 32);
   const cupMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.95, roughness: 0.15 });
   const cup = new THREE.Mesh(cupGeo, cupMat);

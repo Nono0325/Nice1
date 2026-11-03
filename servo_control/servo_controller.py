@@ -6,14 +6,14 @@ Raspberry Pi Stepper Motor & Electromagnet Controller
 =====================================================
 硬體定義與感測器配置：
 1. X 軸: 步進馬達 (PUL: GPIO 12, DIR: GPIO 16, ENA: GPIO 20)
-   - a 點 (左側歸零): 電感式接近開關 HN-1805-E1 方形 24V NPN 常開 (GPIO 17)
-   - b 點 (中間模具工位): 電感式接近開關 HN-1805-E1 方形 24V NPN 常開 (GPIO 25)
-   - c 點 (向右極限/放料): 電感式接近開關 HN-1805-E1 方形 24V NPN 常開 (GPIO 27)
+   - a 點 (左側歸零): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 17)
+   - b 點 (中間模具工位): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 25)
+   - c 點 (向右極限/放料): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 27)
 2. Z 軸 (垂直升降，原 Y 軸改為 Z 軸): 步進馬達 (PUL: GPIO 13, DIR: GPIO 19, ENA: GPIO 26)
-   - d 點 (向上歸零/安全高度): 電感式接近開關 HN-1805-E1 方形 24V NPN 常開 (GPIO 22)
-   - e 點 (向下極限/取放深度): 電感式接近開關 HN-1805-E1 方形 24V NPN 常開 (GPIO 23)
+   - d 點 (向上歸零/安全高度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 22)
+   - e 點 (向下極限/取放深度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 23)
 3. 末端手臂:
-   - 圓形電磁鐵強吸力吸盤 (直流 DC 5V/6V/12V/24V，繼電器驅動 GPIO 24)
+   - 圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, Ø25×20mm, 直流 DC 5V/6V/12V/24V，繼電器驅動 GPIO 24)
    - 金屬吸附檢測霍爾感測器 (GPIO 6，檢測是否確實吸起金屬工件)
 4. 模具衝壓交握:
    - 衝壓機衝壓完成回授訊號 (GPIO 5，光耦隔離輸入)
@@ -68,12 +68,12 @@ PIN = {
     'Y_DIR':          19,
     'Y_ENA':          26,
 
-    # 圓形電磁鐵強吸力吸盤 (直流 DC 5V/6V/12V/24V 繼電器驅動)
+    # 圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, 直流 DC 5V/6V/12V/24V 繼電器驅動)
     'MAGNET':         24,   # 電磁鐵繼電器輸出 (Row 2 - IO24)
     'VACUUM':         24,   # 向下相容別名
     'Z_DOWN':         25,   # 保留舊手臂繼電器標籤兼容
 
-    # 電感式接近開關 HN-1805-E1 方形 24V NPN 常開 (金屬感應導通至 GND -> 樹莓派內部上拉 PUD_UP 讀取為 LOW)
+    # 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (金屬感應導通至 GND -> 樹莓派內部上拉 PUD_UP 讀取為 LOW)
     'LIM_X_A':        17,   # a 點: X 軸歸零/左極限 (Row 1 - IO17)
     'LIM_X_B':        25,   # b 點: X 軸中間模具工位 (Row 2 - IO25) [新增接近開關]
     'LIM_X_C':        27,   # c 點: X 軸向右極限 (Row 4 - IO27)
@@ -122,12 +122,12 @@ state = {
     'z_pct':  50.0,
     'y_pct':  50.0,
 
-    # 數位輸出 (圓形電磁鐵強吸力吸盤)
+    # 數位輸出 (圓形電磁鐵強吸力吸盤 LSD-P25/20)
     'magnet':   False,
     'vacuum':   False,   # 相容舊版名稱
     'z_down':   False,
 
-    # 數位輸入（電感式接近開關 HN-1805-E1 方形 24V NPN 常開）
+    # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開）
     'lim_x_a':        False,  # a 點: X 軸歸零 (原 lim_left)
     'lim_x_b':        False,  # b 點: X 軸中間工位 [新增]
     'lim_x_c':        False,  # c 點: X 軸向右極限 (原 lim_right)
@@ -302,7 +302,7 @@ class StepperMotor:
                 
                 self.current_speed_hz = max(self.min_speed_hz, min(self.max_speed_hz, speed))
                 
-                # 電感式接近開關 HN-1805-E1 方形 24V NPN 常開 安全防護（立即強制煞車，避免持續衝撞）
+                # 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 安全防護（立即強制煞車，避免持續衝撞）
                 if diff < 0 and self.name == 'x' and (state.get('lim_x_a') or state.get('lim_left')):
                     self.halt()
                     time.sleep(0.01)
@@ -385,11 +385,11 @@ def init_gpio():
     if not IS_RASPBERRY_PI:
         return
 
-    # 數位輸出 (圓形電磁鐵繼電器)
+    # 數位輸出 (圓形電磁鐵 LSD-P25/20 繼電器)
     for pin_name in ['MAGNET', 'VACUUM']:
         GPIO.setup(PIN[pin_name], GPIO.OUT, initial=GPIO.LOW)
 
-    # 數位輸入（電感式接近開關 HN-1805-E1 方形 24V NPN 常開 + 手臂金屬霍爾感測器 + 衝壓完成訊號）
+    # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 + 手臂金屬霍爾感測器 + 衝壓完成訊號）
     # NPN 常開開關在感應金屬時拉低至 GND，樹莓派端配置 PUD_UP 內部上拉，讀入為 LOW 時表示觸發
     input_pins = ['LIM_X_A', 'LIM_X_B', 'LIM_X_C', 'LIM_Z_D', 'LIM_Z_E', 'HALL_ARM_METAL', 'PRESS_DONE']
     for pin_name in input_pins:
@@ -408,7 +408,7 @@ def init_gpio():
         except Exception as e:
             print(f"[GPIO] Warning: add_event_detect failed for {pin_name} ({e}), polling fallback active.")
 
-    print("[GPIO] Initialized stepper motor system, HN-1805-E1 sensors, and electromagnet successfully")
+    print("[GPIO] Initialized stepper motor system, QN-1805-E1 sensors, and LSD-P25/20 electromagnet successfully")
 
 def cleanup_gpio():
     """清理 GPIO"""
@@ -453,7 +453,7 @@ def set_digital_output(name, value):
         state['arm_down'] = bool(value)
 
 def read_limit_switches():
-    """讀取所有電感式接近開關 (HN-1805-E1 方形 24V NPN 常開) 與 手臂霍爾感測器 (具備 3-Sample 工業數位防彈跳濾波)"""
+    """讀取所有電感式接近開關 (QN-1805-E1 方形 DC10-30V 三線 NPN 常開) 與 手臂霍爾感測器 (具備 3-Sample 工業數位防彈跳濾波)"""
     global x_stepper, z_stepper, y_stepper
     if IS_RASPBERRY_PI:
         # 工業抗干擾數位濾波 (Digital Debounce Filter)：連續 3 次取樣確認低電位，過濾衝壓電氣火花雜訊
@@ -1272,7 +1272,7 @@ def api_home():
 @app.route('/api/magnet', methods=['POST'])
 @app.route('/api/vacuum', methods=['POST'])
 def api_magnet():
-    """控制圓形電磁鐵強吸力吸盤 (DC 12V/24V 繼電器驅動)"""
+    """控制圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力 8KG, DC 5V/6V/12V/24V 繼電器驅動)"""
     data = request.get_json(silent=True) or {}
     value = bool(data.get('on', False))
     set_digital_output('magnet', value)
@@ -1739,12 +1739,12 @@ def api_diagnose():
             'Y2': {'pin': PIN['Y_PUL'], 'pulse': state['y2_pulse'], 'duty': round(pulse_to_duty(state['y2_pulse']), 3)},
         },
         'digital_outputs': {
-            'MAGNET': {'pin': PIN['MAGNET'], 'state': state['magnet'], 'desc': '圓形電磁鐵強吸力吸盤 (DC 12V/24V)'},
+            'MAGNET': {'pin': PIN['MAGNET'], 'state': state['magnet'], 'model': 'LSD-P25/20', 'desc': '圓形電磁鐵強吸力吸盤 LSD-P25/20 (吸力8KG, DC 5V/6V/12V/24V)'},
             'VACUUM': {'pin': PIN['VACUUM'], 'state': state['vacuum']},
             'Z_DOWN': {'pin': PIN.get('Z_DOWN', 25), 'state': state['z_down']},
         },
         'inductive_sensors': {
-            'sensor_model': 'HN-1805-E1 方形 24V NPN 常開',
+            'sensor_model': 'QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (檢測距離 5mm)',
             'X_A': {'pin': PIN['LIM_X_A'], 'name': 'X軸a點(左歸零)', 'triggered': state.get('lim_x_a')},
             'X_B': {'pin': PIN['LIM_X_B'], 'name': 'X軸b點(中間工位)', 'triggered': state.get('lim_x_b')},
             'X_C': {'pin': PIN['LIM_X_C'], 'name': 'X軸c點(向右極限)', 'triggered': state.get('lim_x_c')},

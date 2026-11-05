@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="樹梅派伺服馬達控制系統 - 即時監控與控制 X/Y 軸伺服馬達">
   <title>伺服馬達控制系統 | Servo Motor Controller</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=1.0.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.0.6">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -220,9 +220,9 @@
         </div>
       </div>
       <div class="position-bar-labels">
-        <span>0.0 mm (a點: 歸零)</span>
-        <span>100.0 mm (b點: 中間模具位)</span>
-        <span>200.0 mm (c點: 右極限放料)</span>
+        <span id="xBarLblLeft">0.0 mm (a點: 歸零)</span>
+        <span id="xBarLblMid">100.0 mm (b點: 中間模具位)</span>
+        <span id="xBarLblRight">200.0 mm (c點: 右極限放料)</span>
       </div>
       <div class="position-track" id="xTrack" style="cursor:pointer" title="點擊設定 X 軸位置">
         <div class="position-track-inner" id="xBar" style="width:50%"></div>
@@ -235,7 +235,7 @@
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-sec)">
-        <span>a點 (0 mm)</span><span>50 mm</span><span>b點 (100 mm)</span><span>150 mm</span><span>c點 (200 mm)</span>
+        <span id="xTick0">a點 (0 mm)</span><span id="xTick1">50 mm</span><span id="xTick2">b點 (100 mm)</span><span id="xTick3">150 mm</span><span id="xTick4">c點 (200 mm)</span>
       </div>
     </div>
 
@@ -250,9 +250,9 @@
         </div>
       </div>
       <div class="position-bar-labels">
-        <span>0.0 mm (e點: 向下極限/取料面)</span>
-        <span>100.0 mm (50% 避讓高度)</span>
-        <span>200.0 mm (d點: 向上歸零/安全高度)</span>
+        <span id="yBarLblLeft">0.0 mm (e點: 向下極限/取料面)</span>
+        <span id="yBarLblMid">100.0 mm (50% 避讓高度)</span>
+        <span id="yBarLblRight">200.0 mm (d點: 向上歸零/安全高度)</span>
       </div>
       <div class="position-track" id="yTrack" style="cursor:pointer" title="點擊設定 Z 軸位置">
         <div class="position-track-inner" id="yBar" style="width:50%;background:linear-gradient(90deg,#065f46,#059669,#10b981)"></div>
@@ -265,7 +265,7 @@
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-sec)">
-        <span>e點 (0 mm)</span><span>50 mm</span><span>50% (100 mm)</span><span>150 mm</span><span>d點 (200 mm)</span>
+        <span id="yTick0">e點 (0 mm)</span><span id="yTick1">50 mm</span><span id="yTick2">50% (100 mm)</span><span id="yTick3">150 mm</span><span id="yTick4">d點 (200 mm)</span>
       </div>
     </div>
 
@@ -676,18 +676,29 @@
     <div class="grid-2">
       <!-- X 軸設定 -->
       <div class="card">
-        <div class="card-title"><span class="icon">↔️</span>X 軸行程範圍設定 (支援 µs 或 mm)</div>
+        <div class="card-title" style="justify-content:space-between">
+          <span><span class="icon">↔️</span>X 軸行程範圍設定 (支援 µs 或 mm)</span>
+          <select id="xLimitUnitSelect" onchange="onLimitUnitChange('x')" style="padding:4px 10px;font-size:13px;border-radius:6px;background:var(--bg-dark);color:var(--accent-cyan);border:1px solid var(--border)">
+            <option value="auto">自動判斷 (µs / mm)</option>
+            <option value="us">µs 脈衝模式</option>
+            <option value="mm">mm 公釐模式</option>
+          </select>
+        </div>
         <div style="display:flex;flex-direction:column;gap:18px">
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸最小值 (可輸入 µs 或 mm，如 500 或 0)</label>
+            <label id="xMinLabel" style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸最小值 (可輸入 µs 或 mm，如 500 或 0)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="xMinInput" value="500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
+              <input type="number" id="xMinInput" value="500" min="0" max="200000" step="any"
+                oninput="markSettingsDirty()" onfocus="markSettingsDirty()"
+                style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸最大值 (可輸入 µs 或 mm，如 3000 或 250)</label>
+            <label id="xMaxLabel" style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">X 軸最大值 (可輸入 µs 或 mm，如 2500 或 200)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="xMaxInput" value="2500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
+              <input type="number" id="xMaxInput" value="2500" min="0" max="200000" step="any"
+                oninput="markSettingsDirty()" onfocus="markSettingsDirty()"
+                style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div style="display:flex;gap:12px;margin-top:8px">
@@ -701,20 +712,31 @@
         </div>
       </div>
 
-      <!-- Y 軸設定 -->
+      <!-- Z/Y 軸設定 -->
       <div class="card">
-        <div class="card-title"><span class="icon">↕️</span>Y 軸行程範圍設定 (支援 µs 或 mm)</div>
+        <div class="card-title" style="justify-content:space-between">
+          <span><span class="icon">↕️</span>Z 軸 (Y 軸) 行程範圍設定 (支援 µs 或 mm)</span>
+          <select id="yLimitUnitSelect" onchange="onLimitUnitChange('y')" style="padding:4px 10px;font-size:13px;border-radius:6px;background:var(--bg-dark);color:var(--accent-green);border:1px solid var(--border)">
+            <option value="auto">自動判斷 (µs / mm)</option>
+            <option value="us">µs 脈衝模式</option>
+            <option value="mm">mm 公釐模式</option>
+          </select>
+        </div>
         <div style="display:flex;flex-direction:column;gap:18px">
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Y 軸最小值 (可輸入 µs 或 mm，如 500 或 0)</label>
+            <label id="yMinLabel" style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Z/Y 軸最小值 (可輸入 µs 或 mm，如 500 或 0)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="yMinInput" value="500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
+              <input type="number" id="yMinInput" value="500" min="0" max="200000" step="any"
+                oninput="markSettingsDirty()" onfocus="markSettingsDirty()"
+                style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div>
-            <label style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Y 軸最大值 (可輸入 µs 或 mm，如 3000 或 250)</label>
+            <label id="yMaxLabel" style="font-size:14px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:8px">Z/Y 軸最大值 (可輸入 µs 或 mm，如 2500 或 200)</label>
             <div style="display:flex;gap:10px;align-items:center">
-              <input type="number" id="yMaxInput" value="2500" min="0" max="200000" step="any" style="width:100%;font-size:18px;font-weight:700">
+              <input type="number" id="yMaxInput" value="2500" min="0" max="200000" step="any"
+                oninput="markSettingsDirty()" onfocus="markSettingsDirty()"
+                style="width:100%;font-size:18px;font-weight:700">
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px">
@@ -723,7 +745,7 @@
             <span style="font-size:14px;color:var(--accent-green);font-weight:700">同步（推薦）</span>
           </div>
           <div style="display:flex;gap:12px;margin-top:8px">
-            <button class="btn btn-primary" style="flex:1" onclick="applyYLimits()">✅ 套用 Y 軸設定</button>
+            <button class="btn btn-primary" style="flex:1" onclick="applyYLimits()">✅ 套用 Z/Y 軸設定</button>
             <button class="btn" onclick="resetYLimits()">↩️ 重置預設</button>
           </div>
           <div style="background:#0d1117;border-radius:8px;padding:16px;font-size:15px;color:var(--text-sec);border:1px solid var(--border)">
@@ -1339,7 +1361,7 @@
 
 </div><!-- end main-container -->
 
-<script src="/static/js/simulator3d.js?v=1.0.5"></script>
-<script src="/static/js/app.js?v=1.0.5"></script>
+<script src="/static/js/simulator3d.js?v=1.0.6"></script>
+<script src="/static/js/app.js?v=1.0.6"></script>
 </body>
 </html>

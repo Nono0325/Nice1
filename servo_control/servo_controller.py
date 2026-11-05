@@ -852,10 +852,12 @@ def broadcast_state():
     while True:
         try:
             # 同步實時馬達位置與百分比、物理 mm 座標至系統狀態中
+            x_min_mm_base = float(state.get('x_min_mm', 0.0))
+            z_min_mm_base = float(state.get('z_min_mm', 0.0))
             if x_stepper:
                 state['x_pulse'] = int(x_stepper.current_pos)
                 state['x_pct'] = max(0.0, min(100.0, (x_stepper.current_pos - state['x_min']) / max(1, state['x_max'] - state['x_min']) * 100.0))
-                state['x_mm'] = round(max(0.0, (x_stepper.current_pos - state['x_min']) / max(0.001, state['x_scale'])), 1)
+                state['x_mm'] = round(x_min_mm_base + max(0.0, (x_stepper.current_pos - state['x_min']) / max(0.001, state['x_scale'])), 1)
             
             st_z = z_stepper or y_stepper
             if st_z:
@@ -864,7 +866,7 @@ def broadcast_state():
                 z_scale = state.get('z_scale', state['y_scale'])
                 state['z_pulse'] = int(st_z.current_pos)
                 state['z_pct'] = max(0.0, min(100.0, (st_z.current_pos - z_min) / max(1, z_max - z_min) * 100.0))
-                state['z_mm'] = round(max(0.0, (st_z.current_pos - z_min) / max(0.001, z_scale)), 1)
+                state['z_mm'] = round(z_min_mm_base + max(0.0, (st_z.current_pos - z_min) / max(0.001, z_scale)), 1)
 
                 # 同步保持 y 鍵名以確保所有舊版前端元件皆向下相容
                 state['y1_pulse'] = state['z_pulse']
@@ -872,13 +874,11 @@ def broadcast_state():
                 state['y_pct'] = state['z_pct']
                 state['y_mm'] = state['z_mm']
 
-            # 計算當前 mm 極限（以 x_min/z_min 為起點 0.0 mm）
-            state['x_min_mm'] = 0.0
-            state['x_max_mm'] = round((state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+            # 計算當前 mm 極限（保留使用者設定之起點偏移）
+            state['x_max_mm'] = round(x_min_mm_base + (state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
             z_scale = state.get('z_scale', state['y_scale'])
-            state['z_min_mm'] = 0.0
-            state['z_max_mm'] = round((state.get('z_max', state['y_max']) - state.get('z_min', state['y_min'])) / max(0.001, z_scale), 1)
-            state['y_min_mm'] = state['z_min_mm']
+            state['z_max_mm'] = round(z_min_mm_base + (state.get('z_max', state['y_max']) - state.get('z_min', state['y_min'])) / max(0.001, z_scale), 1)
+            state['y_min_mm'] = z_min_mm_base
             state['y_max_mm'] = state['z_max_mm']
 
             read_limit_switches()
@@ -1742,6 +1742,48 @@ def api_reset_cycle_count():
     add_history("生產累計計數器已歸零", "info")
     return jsonify({'ok': True, 'cycle_count': 0})
 
+LIMITS_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'limits_config.json')
+
+def save_limits_config():
+    """將行程極限與速度比例設定持久化存檔，重啟後自動載入"""
+    cfg = {
+        'x_min': state['x_min'], 'x_max': state['x_max'],
+        'z_min': state['z_min'], 'z_max': state['z_max'],
+        'y_min': state['y_min'], 'y_max': state['y_max'],
+        'x_min_mm': state.get('x_min_mm', 0.0), 'x_max_mm': state.get('x_max_mm', 200.0),
+        'z_min_mm': state.get('z_min_mm', 0.0), 'z_max_mm': state.get('z_max_mm', 200.0),
+        'y_min_mm': state.get('y_min_mm', 0.0), 'y_max_mm': state.get('y_max_mm', 200.0),
+        'x_scale': state['x_scale'], 'z_scale': state.get('z_scale', state['y_scale']), 'y_scale': state['y_scale'],
+        'x_max_speed': state['x_max_speed'], 'x_accel_steps': state['x_accel_steps'],
+        'z_max_speed': state['z_max_speed'], 'z_accel_steps': state['z_accel_steps'],
+        'y_max_speed': state['y_max_speed'], 'y_accel_steps': state['y_accel_steps'],
+        'homing_speed_hz': state['homing_speed_hz'],
+        'y_sync': state['y_sync'],
+    }
+    try:
+        with open(LIMITS_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[WARN] Failed to save limits_config.json: {e}")
+
+def load_limits_config():
+    if os.path.exists(LIMITS_CONFIG_FILE):
+        try:
+            with open(LIMITS_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+                if isinstance(cfg, dict):
+                    for k in ('x_min', 'x_max', 'z_min', 'z_max', 'y_min', 'y_max',
+                              'x_min_mm', 'x_max_mm', 'z_min_mm', 'z_max_mm', 'y_min_mm', 'y_max_mm',
+                              'x_scale', 'z_scale', 'y_scale',
+                              'x_max_speed', 'x_accel_steps', 'z_max_speed', 'z_accel_steps',
+                              'y_max_speed', 'y_accel_steps', 'homing_speed_hz', 'y_sync'):
+                        if k in cfg:
+                            state[k] = cfg[k]
+        except Exception as e:
+            print(f"[WARN] Failed to load limits_config.json: {e}")
+
+load_limits_config()
+
 @app.route('/api/set_limits', methods=['POST'])
 def api_set_limits():
     """設定馬達行程範圍（支援 mm 與 us）、速度與校準參數"""
@@ -1762,36 +1804,64 @@ def api_set_limits():
             pass
 
     # 支援 mm 與 µs 設定 X 軸（完全解除 2500µs 限制，最高可設 200,000µs）
-    if 'x_min_mm' in data:
-        mm = float(data['x_min_mm'])
-        state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(mm * state['x_scale'])))
-    elif 'x_min' in data:
-        state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(data['x_min'])))
+    if 'x_min_mm' in data or 'x_max_mm' in data:
+        min_mm = float(data.get('x_min_mm', state.get('x_min_mm', 0.0)))
+        max_mm = float(data.get('x_max_mm', state.get('x_max_mm', 200.0)))
+        if max_mm <= min_mm:
+            max_mm = min_mm + 1.0
+        state['x_min_mm'] = round(min_mm, 1)
+        state['x_max_mm'] = round(max_mm, 1)
+        state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + min_mm * state['x_scale']))))
+        state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + max_mm * state['x_scale']))))
+    else:
+        if 'x_min' in data:
+            state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(float(data['x_min'])))))
+        if 'x_max' in data:
+            state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(data['x_max'])))))
+        if 'x_min' in data or 'x_max' in data:
+            state['x_min_mm'] = 0.0
+            state['x_max_mm'] = round((state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
 
-    if 'x_max_mm' in data:
-        mm = float(data['x_max_mm'])
-        state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(state['x_min'] + mm * state['x_scale'])))
-    elif 'x_max' in data:
-        state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(data['x_max'])))
+    # 若 X 軸當前位置超出新設定之範圍，安全夾限至範圍內
+    if x_stepper:
+        clamped_x = max(float(state['x_min']), min(float(state['x_max']), float(x_stepper.current_pos)))
+        if abs(clamped_x - x_stepper.current_pos) > 0.5:
+            x_stepper.set_position(clamped_x)
+            x_stepper.set_target(clamped_x, state['x_min'], state['x_max'])
+        state['x_pulse'] = int(x_stepper.current_pos)
 
     # 支援 mm 與 µs 設定 Z/Y 軸
-    z_min_in = data.get('z_min_mm', data.get('y_min_mm'))
-    if z_min_in is not None:
-        mm = float(z_min_in)
+    z_min_mm_in = data.get('z_min_mm', data.get('y_min_mm'))
+    z_max_mm_in = data.get('z_max_mm', data.get('y_max_mm'))
+    if z_min_mm_in is not None or z_max_mm_in is not None:
         scale = state.get('z_scale', state['y_scale'])
-        state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(mm * scale)))
-    elif 'z_min' in data or 'y_min' in data:
-        val = data.get('z_min', data.get('y_min'))
-        state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(val)))
+        min_mm = float(z_min_mm_in if z_min_mm_in is not None else state.get('z_min_mm', 0.0))
+        max_mm = float(z_max_mm_in if z_max_mm_in is not None else state.get('z_max_mm', 200.0))
+        if max_mm <= min_mm:
+            max_mm = min_mm + 1.0
+        state['z_min_mm'] = state['y_min_mm'] = round(min_mm, 1)
+        state['z_max_mm'] = state['y_max_mm'] = round(max_mm, 1)
+        state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + min_mm * scale))))
+        state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + max_mm * scale))))
+    else:
+        if 'z_min' in data or 'y_min' in data:
+            val = data.get('z_min', data.get('y_min'))
+            state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(float(val)))))
+        if 'z_max' in data or 'y_max' in data:
+            val = data.get('z_max', data.get('y_max'))
+            state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(val)))))
+        if 'z_min' in data or 'y_min' in data or 'z_max' in data or 'y_max' in data:
+            scale = state.get('z_scale', state['y_scale'])
+            state['z_min_mm'] = state['y_min_mm'] = 0.0
+            state['z_max_mm'] = state['y_max_mm'] = round((state['z_max'] - state['z_min']) / max(0.001, scale), 1)
 
-    z_max_in = data.get('z_max_mm', data.get('y_max_mm'))
-    if z_max_in is not None:
-        mm = float(z_max_in)
-        scale = state.get('z_scale', state['y_scale'])
-        state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(state['z_min'] + mm * scale)))
-    elif 'z_max' in data or 'y_max' in data:
-        val = data.get('z_max', data.get('y_max'))
-        state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(val)))
+    st_z = z_stepper or y_stepper
+    if st_z:
+        clamped_z = max(float(state['z_min']), min(float(state['z_max']), float(st_z.current_pos)))
+        if abs(clamped_z - st_z.current_pos) > 0.5:
+            st_z.set_position(clamped_z)
+            st_z.set_target(clamped_z, state['z_min'], state['z_max'])
+        state['z_pulse'] = state['y1_pulse'] = state['y2_pulse'] = int(st_z.current_pos)
 
     if 'y_sync' in data or 'z_sync' in data:
         state['y_sync'] = bool(data.get('z_sync', data.get('y_sync')))
@@ -1807,25 +1877,27 @@ def api_set_limits():
     if z_spd is not None:
         spd_val = float(z_spd)
         state['z_max_speed'] = state['y_max_speed'] = spd_val
-        st_z = z_stepper or y_stepper
         if st_z: st_z.max_speed_hz = spd_val
         
     z_acc = data.get('z_accel_steps', data.get('y_accel_steps'))
     if z_acc is not None:
         acc_val = float(z_acc)
         state['z_accel_steps'] = state['y_accel_steps'] = acc_val
-        st_z = z_stepper or y_stepper
         if st_z: st_z.accel_steps = acc_val
         
     if 'homing_speed_hz' in data:
         state['homing_speed_hz'] = max(100.0, min(2000.0, float(data['homing_speed_hz'])))
-    
-    state['x_min_mm'] = 0.0
-    state['x_max_mm'] = round((state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
-    state['z_min_mm'] = state['y_min_mm'] = 0.0
-    state['z_max_mm'] = state['y_max_mm'] = round((state['z_max'] - state['z_min']) / max(0.001, state.get('z_scale', state['y_scale'])), 1)
 
-    add_history(f"更新行程範圍與參數: X({state['x_min']}~{state['x_max']}µs, 0~{state['x_max_mm']}mm, 比例:{state['x_scale']}), Z/Y({state['z_min']}~{state['z_max']}µs, 0~{state['z_max_mm']}mm, 比例:{state.get('z_scale', state['y_scale'])})", "success")
+    # 若單獨調整了 x_scale / z_scale，重新換算對應 mm 範圍
+    if 'x_scale' in data and 'x_min_mm' not in data and 'x_max_mm' not in data:
+        state['x_max_mm'] = round(state.get('x_min_mm', 0.0) + (state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+    if ('y_scale' in data or 'z_scale' in data) and z_min_mm_in is None and z_max_mm_in is None:
+        scale = state.get('z_scale', state['y_scale'])
+        state['z_max_mm'] = state['y_max_mm'] = round(state.get('z_min_mm', 0.0) + (state['z_max'] - state['z_min']) / max(0.001, scale), 1)
+
+    save_limits_config()
+
+    add_history(f"更新行程範圍與參數: X({state['x_min']}~{state['x_max']}µs, {state['x_min_mm']}~{state['x_max_mm']}mm, 比例:{state['x_scale']}), Z/Y({state['z_min']}~{state['z_max']}µs, {state['z_min_mm']}~{state['z_max_mm']}mm, 比例:{state.get('z_scale', state['y_scale'])})", "success")
     return jsonify({'ok': True, 'limits': {
         'x_min': state['x_min'], 'x_max': state['x_max'],
         'z_min': state['z_min'], 'z_max': state['z_max'],

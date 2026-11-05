@@ -386,12 +386,24 @@ function updateUI() {
   setEl('yMmCurVal', el => el.textContent = `${zMm.toFixed(1)} mm`);
   setEl('blockLiveCoordText', el => el.textContent = `X: ${xMm.toFixed(1)}mm / Z: ${zMm.toFixed(1)}mm`);
 
-  // 進階設定輸入值綁定 (非使用者正在編輯時才同步)
+  // 進階設定輸入值綁定 (非使用者正在編輯時才同步，且依所選單位模式顯示)
   if (!settingsDirty) {
-    setElValue('xMinInput', s.x_min);
-    setElValue('xMaxInput', s.x_max);
-    setElValue('yMinInput', s.z_min !== undefined ? s.z_min : s.y_min);
-    setElValue('yMaxInput', s.z_max !== undefined ? s.z_max : s.y_max);
+    const xUnit = document.getElementById('xLimitUnitSelect')?.value || 'auto';
+    const yUnit = document.getElementById('yLimitUnitSelect')?.value || 'auto';
+    if (xUnit === 'mm') {
+      setElValue('xMinInput', s.x_min_mm !== undefined ? s.x_min_mm : 0);
+      setElValue('xMaxInput', s.x_max_mm !== undefined ? s.x_max_mm : 200);
+    } else {
+      setElValue('xMinInput', s.x_min);
+      setElValue('xMaxInput', s.x_max);
+    }
+    if (yUnit === 'mm') {
+      setElValue('yMinInput', s.z_min_mm !== undefined ? s.z_min_mm : (s.y_min_mm ?? 0));
+      setElValue('yMaxInput', s.z_max_mm !== undefined ? s.z_max_mm : (s.y_max_mm ?? 200));
+    } else {
+      setElValue('yMinInput', s.z_min !== undefined ? s.z_min : s.y_min);
+      setElValue('yMaxInput', s.z_max !== undefined ? s.z_max : s.y_max);
+    }
 
     setElValue('xMaxSpeedInput', s.x_max_speed || 2000);
     setElValue('xAccelStepsInput', s.x_accel_steps || 100);
@@ -490,12 +502,12 @@ function updateUI() {
   // 範圍設定顯示 (同時顯示 µs 與 mm)
   const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : 0.0;
   const xMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : ((s.x_max - s.x_min) / Math.max(0.001, xScale));
-  const yMinMm = s.y_min_mm !== undefined ? s.y_min_mm : 0.0;
-  const yMaxMm = s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - s.y_min) / Math.max(0.001, yScale));
+  const yMinMm = s.z_min_mm !== undefined ? s.z_min_mm : (s.y_min_mm !== undefined ? s.y_min_mm : 0.0);
+  const yMaxMm = s.z_max_mm !== undefined ? s.z_max_mm : (s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - s.y_min) / Math.max(0.001, zScale)));
 
   const curXRangeUs = s.x_max - s.x_min;
   const curXRangeMm = (xMaxMm - xMinMm).toFixed(1);
-  const curYRangeUs = s.y_max - s.y_min;
+  const curYRangeUs = (s.z_max || s.y_max) - (s.z_min || s.y_min);
   const curYRangeMm = (yMaxMm - yMinMm).toFixed(1);
 
   setElText('curXMin', `${s.x_min}`);
@@ -503,10 +515,35 @@ function updateUI() {
   setElText('curXRangeMmLabel', `(${xMinMm.toFixed(1)} ~ ${xMaxMm.toFixed(1)} mm)`);
   setElText('curXRange', `${curXRangeUs} µs (${curXRangeMm} mm)`);
 
-  setElText('curYMin', `${s.y_min}`);
-  setElText('curYMax', `${s.y_max}`);
+  setElText('curYMin', `${s.z_min !== undefined ? s.z_min : s.y_min}`);
+  setElText('curYMax', `${s.z_max !== undefined ? s.z_max : s.y_max}`);
   setElText('curYRangeMmLabel', `(${yMinMm.toFixed(1)} ~ ${yMaxMm.toFixed(1)} mm)`);
   setElText('curYRange', `${curYRangeUs} µs (${curYRangeMm} mm)`);
+
+  // 同步更新控制面板 X 軸與 Z 軸位置條刻度標籤
+  const xMidMm = ((xMinMm + xMaxMm) / 2).toFixed(1);
+  const xQ1Mm  = (xMinMm + (xMaxMm - xMinMm) * 0.25).toFixed(0);
+  const xQ3Mm  = (xMinMm + (xMaxMm - xMinMm) * 0.75).toFixed(0);
+  setElText('xBarLblLeft',  `${xMinMm.toFixed(1)} mm (a點: 歸零)`);
+  setElText('xBarLblMid',   `${xMidMm} mm (b點: 中間模具位)`);
+  setElText('xBarLblRight', `${xMaxMm.toFixed(1)} mm (c點: 右極限放料)`);
+  setElText('xTick0', `a點 (${xMinMm.toFixed(0)} mm)`);
+  setElText('xTick1', `${xQ1Mm} mm`);
+  setElText('xTick2', `b點 (${parseFloat(xMidMm).toFixed(0)} mm)`);
+  setElText('xTick3', `${xQ3Mm} mm`);
+  setElText('xTick4', `c點 (${xMaxMm.toFixed(0)} mm)`);
+
+  const yMidMm = ((yMinMm + yMaxMm) / 2).toFixed(1);
+  const yQ1Mm  = (yMinMm + (yMaxMm - yMinMm) * 0.25).toFixed(0);
+  const yQ3Mm  = (yMinMm + (yMaxMm - yMinMm) * 0.75).toFixed(0);
+  setElText('yBarLblLeft',  `${yMinMm.toFixed(1)} mm (e點: 向下極限/取料面)`);
+  setElText('yBarLblMid',   `${yMidMm} mm (50% 避讓高度)`);
+  setElText('yBarLblRight', `${yMaxMm.toFixed(1)} mm (d點: 向上歸零/安全高度)`);
+  setElText('yTick0', `e點 (${yMinMm.toFixed(0)} mm)`);
+  setElText('yTick1', `${yQ1Mm} mm`);
+  setElText('yTick2', `50% (${parseFloat(yMidMm).toFixed(0)} mm)`);
+  setElText('yTick3', `${yQ3Mm} mm`);
+  setElText('yTick4', `d點 (${yMaxMm.toFixed(0)} mm)`);
 
   // GPIO 模式橫幅（診斷頁）
   const modeTitle = document.getElementById('diagModeTitle');
@@ -714,57 +751,126 @@ function setYSync(val) {
   toast(`Y 軸同步: ${val ? 'ON' : 'OFF'}`, 'info');
 }
 
-// ── 範圍設定 (支援直接輸入 µs 或 mm) ──────────────────────────────────
+// ── 範圍設定 (支援直接輸入 µs 或 mm，以及明確切換單位模式) ─────────────
+function onLimitUnitChange(axis) {
+  markSettingsDirty();
+  if (axis === 'x') {
+    const mode = document.getElementById('xLimitUnitSelect')?.value || 'auto';
+    const minIn = document.getElementById('xMinInput');
+    const maxIn = document.getElementById('xMaxInput');
+    const minLbl = document.getElementById('xMinLabel');
+    const maxLbl = document.getElementById('xMaxLabel');
+    if (mode === 'mm') {
+      if (minIn) minIn.value = state.x_min_mm !== undefined ? state.x_min_mm : 0;
+      if (maxIn) maxIn.value = state.x_max_mm !== undefined ? state.x_max_mm : 200;
+      if (minLbl) minLbl.textContent = 'X 軸最小值 (單位: mm，如 0)';
+      if (maxLbl) maxLbl.textContent = 'X 軸最大值 (單位: mm，如 200 或 300)';
+    } else if (mode === 'us') {
+      if (minIn) minIn.value = state.x_min;
+      if (maxIn) maxIn.value = state.x_max;
+      if (minLbl) minLbl.textContent = 'X 軸最小值 (單位: µs，如 500)';
+      if (maxLbl) maxLbl.textContent = 'X 軸最大值 (單位: µs，如 2500)';
+    } else {
+      if (minIn) minIn.value = state.x_min;
+      if (maxIn) maxIn.value = state.x_max;
+      if (minLbl) minLbl.textContent = 'X 軸最小值 (可輸入 µs 或 mm，如 500 或 0)';
+      if (maxLbl) maxLbl.textContent = 'X 軸最大值 (可輸入 µs 或 mm，如 2500 或 200)';
+    }
+  } else {
+    const mode = document.getElementById('yLimitUnitSelect')?.value || 'auto';
+    const minIn = document.getElementById('yMinInput');
+    const maxIn = document.getElementById('yMaxInput');
+    const minLbl = document.getElementById('yMinLabel');
+    const maxLbl = document.getElementById('yMaxLabel');
+    if (mode === 'mm') {
+      if (minIn) minIn.value = state.z_min_mm !== undefined ? state.z_min_mm : (state.y_min_mm ?? 0);
+      if (maxIn) maxIn.value = state.z_max_mm !== undefined ? state.z_max_mm : (state.y_max_mm ?? 200);
+      if (minLbl) minLbl.textContent = 'Z/Y 軸最小值 (單位: mm，如 0)';
+      if (maxLbl) maxLbl.textContent = 'Z/Y 軸最大值 (單位: mm，如 200 或 300)';
+    } else if (mode === 'us') {
+      if (minIn) minIn.value = state.z_min !== undefined ? state.z_min : state.y_min;
+      if (maxIn) maxIn.value = state.z_max !== undefined ? state.z_max : state.y_max;
+      if (minLbl) minLbl.textContent = 'Z/Y 軸最小值 (單位: µs，如 500)';
+      if (maxLbl) maxLbl.textContent = 'Z/Y 軸最大值 (單位: µs，如 2500)';
+    } else {
+      if (minIn) minIn.value = state.z_min !== undefined ? state.z_min : state.y_min;
+      if (maxIn) maxIn.value = state.z_max !== undefined ? state.z_max : state.y_max;
+      if (minLbl) minLbl.textContent = 'Z/Y 軸最小值 (可輸入 µs 或 mm，如 500 或 0)';
+      if (maxLbl) maxLbl.textContent = 'Z/Y 軸最大值 (可輸入 µs 或 mm，如 2500 或 200)';
+    }
+  }
+}
+
 async function applyXLimits() {
   const xMinVal = parseFloat(document.getElementById('xMinInput').value);
   const xMaxVal = parseFloat(document.getElementById('xMaxInput').value);
+  const unitMode = document.getElementById('xLimitUnitSelect')?.value || 'auto';
   if (isNaN(xMinVal) || isNaN(xMaxVal) || xMinVal >= xMaxVal) {
-    toast('最小值必須小於最大值', 'error');
+    toast('X 軸最小值必須小於最大值', 'error');
     return;
   }
   let payload = {};
-  if (xMaxVal > 400) {
-    payload = { x_min: xMinVal, x_max: xMaxVal };
-  } else {
+  const isMm = unitMode === 'mm' || (unitMode === 'auto' && xMaxVal <= 400);
+  if (isMm) {
     payload = { x_min_mm: xMinVal, x_max_mm: xMaxVal };
+  } else {
+    payload = { x_min: xMinVal, x_max: xMaxVal };
   }
   const r = await apiPost('/api/set_limits', payload);
   if (r.ok) {
-    toast(`✅ X 軸行程設定成功！`, 'success');
-    addLog(`X軸極限更新`, 'success');
+    if (r.limits) {
+      state = { ...state, ...r.limits };
+    }
     clearSettingsDirty();
+    updateUI();
+    toast(`✅ X 軸行程已更新：${state.x_min} ~ ${state.x_max} µs (${state.x_min_mm} ~ ${state.x_max_mm} mm)`, 'success');
+    addLog(`X軸極限更新: ${state.x_min}~${state.x_max}µs (${state.x_min_mm}~${state.x_max_mm}mm)`, 'success');
+  } else {
+    toast(r.msg || 'X 軸範圍更新失敗', 'error');
   }
 }
 
 async function applyYLimits() {
   const yMinVal = parseFloat(document.getElementById('yMinInput').value);
   const yMaxVal = parseFloat(document.getElementById('yMaxInput').value);
+  const unitMode = document.getElementById('yLimitUnitSelect')?.value || 'auto';
   const sync = document.getElementById('ySyncSetting')?.checked ?? true;
   if (isNaN(yMinVal) || isNaN(yMaxVal) || yMinVal >= yMaxVal) {
-    toast('最小值必須小於最大值', 'error');
+    toast('Z/Y 軸最小值必須小於最大值', 'error');
     return;
   }
   let payload = {};
-  if (yMaxVal > 400) {
-    payload = { y_min: yMinVal, y_max: yMaxVal, y_sync: sync };
-  } else {
+  const isMm = unitMode === 'mm' || (unitMode === 'auto' && yMaxVal <= 400);
+  if (isMm) {
     payload = { y_min_mm: yMinVal, y_max_mm: yMaxVal, y_sync: sync };
+  } else {
+    payload = { y_min: yMinVal, y_max: yMaxVal, y_sync: sync };
   }
   const r = await apiPost('/api/set_limits', payload);
   if (r.ok) {
-    toast(`✅ Y 軸行程設定成功！`, 'success');
-    addLog(`Y軸極限更新`, 'success');
+    if (r.limits) {
+      state = { ...state, ...r.limits };
+    }
     clearSettingsDirty();
+    updateUI();
+    toast(`✅ Z/Y 軸行程已更新：${state.z_min} ~ ${state.z_max} µs (${state.z_min_mm} ~ ${state.z_max_mm} mm)`, 'success');
+    addLog(`Z/Y軸極限更新: ${state.z_min}~${state.z_max}µs (${state.z_min_mm}~${state.z_max_mm}mm)`, 'success');
+  } else {
+    toast(r.msg || 'Z/Y 軸範圍更新失敗', 'error');
   }
 }
 
 function resetXLimits() {
+  const unitSel = document.getElementById('xLimitUnitSelect');
+  if (unitSel) unitSel.value = 'auto';
   document.getElementById('xMinInput').value = '500';
   document.getElementById('xMaxInput').value = '2500';
   applyXLimits();
 }
 
 function resetYLimits() {
+  const unitSel = document.getElementById('yLimitUnitSelect');
+  if (unitSel) unitSel.value = 'auto';
   document.getElementById('yMinInput').value = '500';
   document.getElementById('yMaxInput').value = '2500';
   applyYLimits();
@@ -2518,11 +2624,16 @@ document.addEventListener('DOMContentLoaded', () => {
   drawGcodePath();
   loadAppearanceFromStorage();
 
-  // 設定頁輸入框監聽—標記 dirty，防止 WebSocket 覆蓋
-  ['xMaxSpeedInput','xAccelStepsInput','xScaleInput',
-   'yMaxSpeedInput','yAccelStepsInput','yScaleInput'].forEach(id => {
+  // 設定頁所有輸入框監聽—標記 dirty，防止 100ms WebSocket 廣播覆蓋使用者正在修改的值
+  ['xMinInput','xMaxInput','yMinInput','yMaxInput',
+   'xMaxSpeedInput','xAccelStepsInput','xScaleInput',
+   'yMaxSpeedInput','yAccelStepsInput','yScaleInput','homingSpeedInput'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', markSettingsDirty);
+    if (el) {
+      el.addEventListener('input', markSettingsDirty);
+      el.addEventListener('focus', markSettingsDirty);
+      el.addEventListener('change', markSettingsDirty);
+    }
   });
 
   // 終端機驗證密碼框 Enter 鍵

@@ -3,8 +3,15 @@
  * Raspberry Pi Servo Motor Controller - Frontend App
  */
 
-// ── WebSocket 連線 ──────────────────────────────────────────────
-const socket = io({ transports: ['websocket', 'polling'] });
+// ── WebSocket 連線（高穩定自動重連配置 + HTTP 備援）──────────────────
+const socket = io({
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 3000,
+  reconnectionAttempts: Infinity,
+  timeout: 20000
+});
 
 // ── 全域狀態 ──────────────────────────────────────────────────
 let state = {
@@ -172,12 +179,23 @@ socket.on('disconnect', () => {
   updateDiagWsTag(false);
 });
 
+let uiUpdatePending = false;
+function scheduleUIUpdate() {
+  if (uiUpdatePending) return;
+  uiUpdatePending = true;
+  requestAnimationFrame(() => {
+    uiUpdatePending = false;
+    updateUI();
+    const simTab = document.getElementById('tab-content-simulation3d');
+    if (simTab && simTab.classList.contains('active') && typeof update3D === 'function') {
+      update3D(state);
+    }
+  });
+}
+
 socket.on('state_update', (data) => {
   state = { ...state, ...data };
-  updateUI();
-  if (typeof update3D === 'function') {
-    update3D(state);
-  }
+  scheduleUIUpdate();
 });
 
 socket.on('pickup_step', (data) => {
@@ -424,10 +442,13 @@ function updateUI() {
   const vacBtn = document.getElementById('btnVacuum');
   if (vacBtn) vacBtn.className = `btn-amber-toggle${(s.magnet || s.vacuum) ? ' on' : ''}`;
 
-  // 監控 Tab - 量規
-  drawGauge('gaugeX',  s.x_pulse,  s.x_min,  s.x_max,  '#3b82f6');
-  drawGauge('gaugeY1', zPulse,     s.z_min || s.y_min,  s.z_max || s.y_max,  '#10b981');
-  drawGauge('gaugeY2', zPulse,     s.z_min || s.y_min,  s.z_max || s.y_max,  '#8b5cf6');
+  // 監控 Tab - 量規（僅在監控分頁顯示時重繪 Canvas，避免背景高頻重繪卡頓）
+  const monTab = document.getElementById('tab-content-monitor');
+  if (!monTab || monTab.classList.contains('active')) {
+    drawGauge('gaugeX',  s.x_pulse,  s.x_min,  s.x_max,  '#3b82f6');
+    drawGauge('gaugeY1', zPulse,     s.z_min || s.y_min,  s.z_max || s.y_max,  '#10b981');
+    drawGauge('gaugeY2', zPulse,     s.z_min || s.y_min,  s.z_max || s.y_max,  '#8b5cf6');
+  }
   setEl('gaugeXVal',  el => el.textContent = `${s.x_pulse} µs`);
   setEl('gaugeY1Val', el => el.textContent = `${zPulse} µs`);
   setEl('gaugeY2Val', el => el.textContent = `${zPulse} µs`);
@@ -560,13 +581,16 @@ function updateUI() {
     }
   }
 
-  // Chart.js 更新
+  // Chart.js 更新（僅在訊號檢測分頁啟用時重繪圖表，降低瀏覽器主執行緒負載）
   if (s.pwm_history && chartX && chartY) {
     chartX.data.datasets[0].data = [...s.pwm_history.x];
-    chartX.update('none');
     chartY.data.datasets[0].data = [...s.pwm_history.y1];
     chartY.data.datasets[1].data = [...s.pwm_history.y2];
-    chartY.update('none');
+    const sigTab = document.getElementById('tab-content-signal');
+    if (sigTab && sigTab.classList.contains('active')) {
+      chartX.update('none');
+      chartY.update('none');
+    }
   }
 
   // 位置 tag 更新
@@ -625,6 +649,10 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
   document.getElementById(`tab-content-${name}`)?.classList.add('active');
   document.getElementById(`tab-${name}`)?.classList.add('active');
+
+  if (name === 'monitor' || name === 'signal') {
+    updateUI();
+  }
 
   if (name === 'diagnose') loadDiagnose();
 
@@ -686,12 +714,20 @@ async function cmdPickup() {
   }
 }
 
-// ── 馬達移動 (支援 100+100 累加與 mm 單位) ─────────────────────────
-function moveAxis(axis, dir) {
+// ── 馬達移動 (支援 100+100 累加、mm 單位與 WebSocket/HTTP 雙通道不斷線控制) ──
+async function moveAxis(axis, dir) {
   if (!state.system_run) { toast('系統未啟動，請先按下 START', 'error'); return; }
   const deltaMm = dir * stepSizeMm;
-  // 發送 mm 增量，後端在 StepperMotor 目標位置上進行累加
-  socket.emit('cmd_move', { axis, delta_mm: deltaMm });
+  try {
+    const r = await apiPost('/api/move', { axis, delta_mm: deltaMm });
+    if (r && !r.ok && r.msg) {
+      toast(r.msg, 'warn');
+    }
+  } catch (e) {
+    if (socket && socket.connected) {
+      socket.emit('cmd_move', { axis, delta_mm: deltaMm });
+    }
+  }
 }
 
 // ── 步進移動量 (mm) ───────────────────────────────────────────
@@ -2664,6 +2700,22 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   setupTrackClick('xTrack', 'x');
   setupTrackClick('yTrack', 'y');
+
+  // WebSocket 斷線或重連期間的 HTTP 自動備援輪詢（確保網頁永遠可監控與控制）
+  setInterval(async () => {
+    if (!socket.connected) {
+      try {
+        const res = await fetch('/api/status', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          state = { ...state, ...data };
+          scheduleUIUpdate();
+        }
+      } catch (e) {
+        // 忽略短暫網路錯誤
+      }
+    }
+  }, 1000);
 
   // 全站認證檢查（最後執行，可能會顯示登入遮罩）
   checkSiteAuthOnLoad();

@@ -37,7 +37,14 @@ from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'servo_control_secret_2024'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',
+    ping_timeout=60,
+    ping_interval=20,
+    max_http_buffer_size=1000000
+)
 
 # ── GPIO 模式偵測（非 Pi 環境使用 Mock） ───────────────────────────
 IS_RASPBERRY_PI = False
@@ -365,24 +372,16 @@ class StepperMotor:
                         self.current_pos -= step_chunk
                     continue
 
-                # 實際樹梅派模式
+                # 實際樹梅派模式：使用 time.sleep 釋放 Python GIL，避免忙等迴圈卡死 Flask/WebSocket 執行緒導致斷線
                 direction = GPIO.HIGH if diff > 0 else GPIO.LOW
                 GPIO.output(self.dir_pin, direction)
 
-                # 發送步進脈衝 (優化高精度定時，避免雙重 time.sleep 瓶頸)
                 GPIO.output(self.pul_pin, GPIO.HIGH)
-                t_pulse = time.perf_counter() + 0.000004
-                while time.perf_counter() < t_pulse:
-                    pass
+                time.sleep(0.00001)
                 GPIO.output(self.pul_pin, GPIO.LOW)
 
-                step_delay = 1.0 / self.current_speed_hz
-                t_next = time.perf_counter() + step_delay
-                # 先 sleep 釋放 GIL（保留最後 200µs 做忙等精準補正）
-                if step_delay > 0.0002:
-                    time.sleep(step_delay - 0.0002)
-                while time.perf_counter() < t_next:
-                    pass
+                step_delay = max(0.0002, (1.0 / self.current_speed_hz) - 0.00001)
+                time.sleep(step_delay)
 
                 if diff > 0:
                     self.current_pos += step_val
@@ -425,6 +424,7 @@ def init_gpio():
 
     # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 + 8顆手臂金屬霍爾感測器(兩個一組) + 衝壓完成訊號）
     # NPN 常開開關與 817 光耦隔離板在感應金屬時輸出拉低至 GND，樹莓派端配置 PUD_UP 內部上拉，讀入為 LOW 時表示觸發
+    # 採用穩定週期輪詢 (Polling) 取代 14 腳位 GPIO 中斷 (add_event_detect)，徹底消除電磁雜訊中斷風暴與 RPi.GPIO 執行緒 GIL 死鎖
     input_pins = ['LIM_X_A', 'LIM_X_B', 'LIM_X_C', 'LIM_Z_D', 'LIM_Z_E'] + HALL_PIN_KEYS + ['PRESS_DONE']
     for pin_name in input_pins:
         p = PIN[pin_name]
@@ -433,24 +433,23 @@ def init_gpio():
             GPIO.remove_event_detect(p)
         except Exception:
             pass
-        try:
-            GPIO.add_event_detect(
-                p, GPIO.BOTH,
-                callback=lambda ch: read_limit_switches(),
-                bouncetime=30
-            )
-        except Exception as e:
-            print(f"[GPIO] Warning: add_event_detect failed for {pin_name} ({e}), polling fallback active.")
 
     print("[GPIO] Initialized stepper motor system, QN-1805-E1 sensors, and LSD-P25/20 electromagnet successfully")
 
 def cleanup_gpio():
-    """清理 GPIO"""
-    global x_stepper, z_stepper, y_stepper
+    """清理 GPIO 與安全關閉硬體看門狗"""
+    global x_stepper, z_stepper, y_stepper, watchdog_fd
     if x_stepper:
         x_stepper.stop()
     if z_stepper:
         z_stepper.stop()
+    if watchdog_fd and not watchdog_fd.closed:
+        try:
+            watchdog_fd.write('V')  # Magic close character: 防止服務重啟時觸發樹莓派硬體強制重開機
+            watchdog_fd.flush()
+            watchdog_fd.close()
+        except Exception:
+            pass
     if not IS_RASPBERRY_PI:
         return
     GPIO.cleanup()
@@ -504,70 +503,78 @@ def set_digital_output(name, value):
         state['z_down'] = val_bool
         state['arm_down'] = val_bool
 
+sensor_read_lock = threading.Lock()
+
 def read_limit_switches():
     """讀取所有電感式接近開關 (QN-1805-E1) 與 8 顆末端金屬霍爾感測器 (兩個一組共 4 組，具備 3-Sample 工業數位防彈跳濾波)"""
     global x_stepper, z_stepper, y_stepper
-    if IS_RASPBERRY_PI:
-        # 工業抗干擾數位濾波 (Digital Debounce Filter)：連續 3 次取樣確認低電位，過濾衝壓電氣火花雜訊
-        pins = [
-            PIN['LIM_X_A'], PIN['LIM_X_B'], PIN['LIM_X_C'],
-            PIN['LIM_Z_D'], PIN['LIM_Z_E'],
-            PIN['HALL_1'], PIN['HALL_2'], PIN['HALL_3'], PIN['HALL_4'],
-            PIN['HALL_5'], PIN['HALL_6'], PIN['HALL_7'], PIN['HALL_8'],
-            PIN['PRESS_DONE']
-        ]
-        readings = [0] * len(pins)
-        for _ in range(3):
-            for i, p in enumerate(pins):
-                if not GPIO.input(p): # NPN 常開開關 / 817 光耦感應金屬時輸出接通 GND(0V)，低電位觸發
-                    readings[i] += 1
-            time.sleep(0.001)
+    if not sensor_read_lock.acquire(blocking=False):
+        return
+    try:
+        if IS_RASPBERRY_PI:
+            # 工業抗干擾數位濾波 (Digital Debounce Filter)：3 次快速取樣多數決 (>=2)，無阻塞讀取
+            pins = [
+                PIN['LIM_X_A'], PIN['LIM_X_B'], PIN['LIM_X_C'],
+                PIN['LIM_Z_D'], PIN['LIM_Z_E'],
+                PIN['HALL_1'], PIN['HALL_2'], PIN['HALL_3'], PIN['HALL_4'],
+                PIN['HALL_5'], PIN['HALL_6'], PIN['HALL_7'], PIN['HALL_8'],
+                PIN['PRESS_DONE']
+            ]
+            readings = [0] * len(pins)
+            for sample_idx in range(3):
+                for i, p in enumerate(pins):
+                    if not GPIO.input(p): # NPN 常開開關 / 817 光耦感應金屬時輸出接通 GND(0V)，低電位觸發
+                        readings[i] += 1
+                if sample_idx < 2:
+                    time.sleep(0.0001)
 
-        state['lim_x_a'] = readings[0] == 3
-        state['lim_x_b'] = readings[1] == 3
-        state['lim_x_c'] = readings[2] == 3
-        state['lim_z_d'] = readings[3] == 3
-        state['lim_z_e'] = readings[4] == 3
-        for idx in range(8):
-            state[f'hall_{idx+1}'] = readings[5 + idx] == 3
-        state['press_done'] = readings[13] == 3
-    else:
-        # 模擬模式：根據步進馬達當前位置計算感測器觸發
-        if x_stepper:
-            state['lim_x_a'] = x_stepper.current_pos <= state['x_min'] + 5
-            x_mid = (state['x_min'] + state['x_max']) / 2.0
-            state['lim_x_b'] = abs(x_stepper.current_pos - x_mid) <= 30
-            state['lim_x_c'] = x_stepper.current_pos >= state['x_max'] - 5
-        st_z = z_stepper or y_stepper
-        if st_z:
-            z_min = state.get('z_min', state['y_min'])
-            z_max = state.get('z_max', state['y_max'])
-            state['lim_z_e'] = st_z.current_pos <= z_min + 5
-            state['lim_z_d'] = st_z.current_pos >= z_max - 5
-        # 模擬模式：4 組電磁鐵 (M1~M4) 分別對應模擬 4 組霍爾開關 (G1: H1+H2, G2: H3+H4, G3: H5+H6, G4: H7+H8)
-        for g in range(1, 5):
-            g_mag = bool(state.get(f'magnet_{g}', state.get('magnet', False)))
-            state[f'hall_{g*2 - 1}'] = g_mag
-            state[f'hall_{g*2}']     = g_mag
-        state['press_done'] = True
+            state['lim_x_a'] = readings[0] >= 2
+            state['lim_x_b'] = readings[1] >= 2
+            state['lim_x_c'] = readings[2] >= 2
+            state['lim_z_d'] = readings[3] >= 2
+            state['lim_z_e'] = readings[4] >= 2
+            for idx in range(8):
+                state[f'hall_{idx+1}'] = readings[5 + idx] >= 2
+            state['press_done'] = readings[13] >= 2
+        else:
+            # 模擬模式：根據步進馬達當前位置計算感測器觸發
+            if x_stepper:
+                state['lim_x_a'] = x_stepper.current_pos <= state['x_min'] + 5
+                x_mid = (state['x_min'] + state['x_max']) / 2.0
+                state['lim_x_b'] = abs(x_stepper.current_pos - x_mid) <= 30
+                state['lim_x_c'] = x_stepper.current_pos >= state['x_max'] - 5
+            st_z = z_stepper or y_stepper
+            if st_z:
+                z_min = state.get('z_min', state['y_min'])
+                z_max = state.get('z_max', state['y_max'])
+                state['lim_z_e'] = st_z.current_pos <= z_min + 5
+                state['lim_z_d'] = st_z.current_pos >= z_max - 5
+            # 模擬模式：4 組電磁鐵 (M1~M4) 分別對應模擬 4 組霍爾開關 (G1: H1+H2, G2: H3+H4, G3: H5+H6, G4: H7+H8)
+            for g in range(1, 5):
+                g_mag = bool(state.get(f'magnet_{g}', state.get('magnet', False)))
+                state[f'hall_{g*2 - 1}'] = g_mag
+                state[f'hall_{g*2}']     = g_mag
+            state['press_done'] = True
 
-    # 計算 8 顆霍爾開關「兩個一組」(共 4 組) 狀態：同組兩顆皆觸發 (或組內觸發)
-    state['hall_group_1'] = bool(state['hall_1'] and state['hall_2'])
-    state['hall_group_2'] = bool(state['hall_3'] and state['hall_4'])
-    state['hall_group_3'] = bool(state['hall_5'] and state['hall_6'])
-    state['hall_group_4'] = bool(state['hall_7'] and state['hall_8'])
-    state['hall_active_count'] = sum(1 for i in range(1, 9) if state.get(f'hall_{i}'))
-    state['hall_group_count']  = sum(1 for g in range(1, 5) if state.get(f'hall_group_{g}'))
-    # 當任一組完整觸發 (或有霍爾感應到金屬) 時，判定金屬在位
-    state['hall_arm_metal'] = bool(state['hall_group_count'] > 0 or state['hall_active_count'] > 0)
+        # 計算 8 顆霍爾開關「兩個一組」(共 4 組) 狀態：同組兩顆皆觸發 (或組內觸發)
+        state['hall_group_1'] = bool(state['hall_1'] and state['hall_2'])
+        state['hall_group_2'] = bool(state['hall_3'] and state['hall_4'])
+        state['hall_group_3'] = bool(state['hall_5'] and state['hall_6'])
+        state['hall_group_4'] = bool(state['hall_7'] and state['hall_8'])
+        state['hall_active_count'] = sum(1 for i in range(1, 9) if state.get(f'hall_{i}'))
+        state['hall_group_count']  = sum(1 for g in range(1, 5) if state.get(f'hall_group_{g}'))
+        # 當任一組完整觸發 (或有霍爾感應到金屬) 時，判定金屬在位
+        state['hall_arm_metal'] = bool(state['hall_group_count'] > 0 or state['hall_active_count'] > 0)
 
-    # 同步舊有名稱鏡像
-    state['lim_left'] = state['lim_x_a']
-    state['lim_mid'] = state['lim_x_b']
-    state['lim_right'] = state['lim_x_c']
-    state['lim_up'] = state['lim_z_d']
-    state['lim_down'] = state['lim_z_e']
-    state['hall_metal'] = state['hall_arm_metal']
+        # 同步舊有名稱鏡像
+        state['lim_left'] = state['lim_x_a']
+        state['lim_mid'] = state['lim_x_b']
+        state['lim_right'] = state['lim_x_c']
+        state['lim_up'] = state['lim_z_d']
+        state['lim_down'] = state['lim_z_e']
+        state['hall_metal'] = state['hall_arm_metal']
+    finally:
+        sensor_read_lock.release()
 
 def _execute_hardware_homing(target_axes):
     """樹梅派真實 GPIO 兩階段高精準歸零核心 (X回a點, Z回d點向上歸零)"""
@@ -621,34 +628,20 @@ def _execute_hardware_homing(target_axes):
                 if homing_abort_event.is_set():
                     add_history("歸零程序被中止（緊急停止）", "warn")
                     return
-                t_p_start = time.perf_counter()
                 GPIO.output(cfg['pul_pin'], GPIO.HIGH)
-                t_pulse = time.perf_counter() + 0.000004
-                while time.perf_counter() < t_pulse:
-                    pass
+                time.sleep(0.00001)
                 GPIO.output(cfg['pul_pin'], GPIO.LOW)
                 pre_steps += 1
-                t_rem = (t_p_start + pre_step_interval) - time.perf_counter()
-                if t_rem > 0.0002:
-                    time.sleep(t_rem - 0.0002)
-                while time.perf_counter() < (t_p_start + pre_step_interval):
-                    pass
+                time.sleep(max(0.0005, pre_step_interval - 0.00001))
             
             # 再多退 50 步作安全淨空
             for _ in range(50):
                 if homing_abort_event.is_set():
                     return
-                t_p_start = time.perf_counter()
                 GPIO.output(cfg['pul_pin'], GPIO.HIGH)
-                t_pulse = time.perf_counter() + 0.000004
-                while time.perf_counter() < t_pulse:
-                    pass
+                time.sleep(0.00001)
                 GPIO.output(cfg['pul_pin'], GPIO.LOW)
-                t_rem = (t_p_start + pre_step_interval) - time.perf_counter()
-                if t_rem > 0.0002:
-                    time.sleep(t_rem - 0.0002)
-                while time.perf_counter() < (t_p_start + pre_step_interval):
-                    pass
+                time.sleep(max(0.0005, pre_step_interval - 0.00001))
 
     # ── 階段 B: 平穩逼近 (Toward Origin / Seek) ───────────────────
     homing_hz = max(150.0, min(800.0, float(state.get('homing_speed_hz', 400.0))))
@@ -665,7 +658,6 @@ def _execute_hardware_homing(target_axes):
             add_history("歸零程序被中止（緊急停止）", "warn")
             return
 
-        t_step_start = time.perf_counter()
         active_pulse = []
 
         for cfg in axis_configs:
@@ -681,20 +673,14 @@ def _execute_hardware_homing(target_axes):
         if not active_pulse:
             break
 
-        t_pulse = time.perf_counter() + 0.000004
-        while time.perf_counter() < t_pulse:
-            pass
+        time.sleep(0.00001)
 
         for cfg in active_pulse:
             GPIO.output(cfg['pul_pin'], GPIO.LOW)
             cfg['stepper'].current_pos += cfg['step_sign'] * cfg['step_val']
 
         steps += 1
-        t_rem = (t_step_start + step_interval) - time.perf_counter()
-        if t_rem > 0.0002:
-            time.sleep(t_rem - 0.0002)
-        while time.perf_counter() < (t_step_start + step_interval):
-            pass
+        time.sleep(max(0.0003, step_interval - 0.00001))
 
     for cfg in axis_configs:
         if not cfg['triggered']:
@@ -714,33 +700,19 @@ def _execute_hardware_homing(target_axes):
         while not GPIO.input(cfg['lim_pin']) and bo_steps < 2000:
             if homing_abort_event.is_set():
                 return
-            t_b_start = time.perf_counter()
             GPIO.output(cfg['pul_pin'], GPIO.HIGH)
-            t_pulse = time.perf_counter() + 0.000004
-            while time.perf_counter() < t_pulse:
-                pass
+            time.sleep(0.00001)
             GPIO.output(cfg['pul_pin'], GPIO.LOW)
             bo_steps += 1
-            t_rem = (t_b_start + backoff_interval) - time.perf_counter()
-            if t_rem > 0.0002:
-                time.sleep(t_rem - 0.0002)
-            while time.perf_counter() < (t_b_start + backoff_interval):
-                pass
+            time.sleep(max(0.0005, backoff_interval - 0.00001))
 
         for _ in range(25):
             if homing_abort_event.is_set():
                 return
-            t_b_start = time.perf_counter()
             GPIO.output(cfg['pul_pin'], GPIO.HIGH)
-            t_pulse = time.perf_counter() + 0.000004
-            while time.perf_counter() < t_pulse:
-                pass
+            time.sleep(0.00001)
             GPIO.output(cfg['pul_pin'], GPIO.LOW)
-            t_rem = (t_b_start + backoff_interval) - time.perf_counter()
-            if t_rem > 0.0002:
-                time.sleep(t_rem - 0.0002)
-            while time.perf_counter() < (t_b_start + backoff_interval):
-                pass
+            time.sleep(max(0.0005, backoff_interval - 0.00001))
 
         # 標記歸零點座標
         cfg['stepper'].set_position(cfg['home_pos'])
@@ -910,15 +882,15 @@ def broadcast_state():
                     state['error_msg'] = "電磁鐵連續通電超過 45 秒，強制斷電保護"
                     add_history("⚠️ 安全保護：電磁鐵連續吸附超過 45 秒，強制斷電防線圈過熱！", "warn")
 
-            payload = {
-                **state,
-                'pwm_history': {
+            payload = dict(state)
+            # 每 3 次廣播才附帶較大的 pwm_history 與 pin_config，大幅減輕 WebSocket 封包負載避免斷線
+            if sim_tick % 3 == 0:
+                payload['pwm_history'] = {
                     'x':  list(pwm_history['x']),
                     'y1': list(pwm_history['y1']),
                     'y2': list(pwm_history['y2']),
-                },
-                'pin_config': PIN,
-            }
+                }
+                payload['pin_config'] = PIN
             socketio.emit('state_update', payload)
 
         except Exception as e:
@@ -928,16 +900,16 @@ def broadcast_state():
         sim_tick += 1
         state['uptime_sec'] = int(time.time() - t_system_start)
 
-        # 每 30 分鐘 (18,000 次 100ms tick) 執行主動垃圾回收，防止長週期記憶體碎片
-        if sim_tick % 18000 == 0:
+        # 每 30 分鐘執行主動垃圾回收，防止長週期記憶體碎片
+        if sim_tick % 10000 == 0:
             gc.collect()
 
-        # 每 5 分鐘 (3,000 次 100ms tick) 若有新日誌才非同步刷入 SD 卡，延長 MicroSD 壽命
-        if sim_tick % 3000 == 0:
+        # 每 5 分鐘若有新日誌才非同步刷入 SD 卡，延長 MicroSD 壽命
+        if sim_tick % 1600 == 0:
             if history_dirty:
                 save_history()
 
-        time.sleep(0.1)
+        time.sleep(0.18)
 
 # ── REST API ──────────────────────────────────────────────────────
 @app.after_request
@@ -2518,12 +2490,12 @@ def api_terminal_exec():
 
 @socketio.on('cmd_move')
 def on_cmd_move(data):
-    """WebSocket 移動命令（低延遲，支援 mm 累加目標 100+100）"""
-    axis = data.get('axis', 'x')
+    """WebSocket 移動命令（低延遲，支援 X/Z 軸與 mm 累加目標 100+100）"""
+    axis = str(data.get('axis', 'x')).lower()
     delta_mm = data.get('delta_mm')
     delta_us = data.get('delta')
 
-    scale = state['x_scale'] if axis == 'x' else state['y_scale']
+    scale = state['x_scale'] if axis == 'x' else state.get('z_scale', state['y_scale'])
     if delta_mm is not None:
         delta = float(delta_mm) * float(scale)
     else:
@@ -2531,27 +2503,33 @@ def on_cmd_move(data):
 
     if state['system_run']:
         if axis == 'x':
-            if state['lim_left'] and delta < 0:
+            if (state.get('lim_x_a') or state.get('lim_left')) and delta < 0:
                 return
-            if state['lim_right'] and delta > 0:
+            if (state.get('lim_x_c') or state.get('lim_right')) and delta > 0:
                 return
             if x_stepper:
                 x_stepper.add_target_delta(delta, state['x_min'], state['x_max'])
-        elif axis in ('y', 'y1', 'y2'):
-            if state['lim_down'] and delta < 0:
+        elif axis in ('z', 'y', 'y1', 'y2'):
+            if (state.get('lim_z_e') or state.get('lim_down')) and delta < 0:
                 return
-            if state['lim_up'] and delta > 0:
+            if (state.get('lim_z_d') or state.get('lim_up')) and delta > 0:
                 return
-            if y_stepper:
-                y_stepper.add_target_delta(delta, state['y_min'], state['y_max'])
+            st_z = z_stepper or y_stepper
+            z_min = state.get('z_min', state['y_min'])
+            z_max = state.get('z_max', state['y_max'])
+            if st_z:
+                st_z.add_target_delta(delta, z_min, z_max)
 
 # ── 樹梅派硬體看門狗晶片守護 (BCM2835 Hardware Watchdog) ─────────
 watchdog_fd = None
 
 def init_hardware_watchdog():
-    """啟動樹梅派硬體看門狗 (/dev/watchdog) 心跳守護線程"""
+    """啟動樹梅派硬體看門狗 (/dev/watchdog) 心跳守護線程（預設交由 systemd 管理，設 ENABLE_HW_WATCHDOG=1 時啟用）"""
     global watchdog_fd
     if not IS_RASPBERRY_PI:
+        return
+    if os.environ.get('ENABLE_HW_WATCHDOG', '0') != '1':
+        print("[WATCHDOG] 採 systemd 服務守護模式 (未獨佔開啟 /dev/watchdog，防止重啟時系統重開機)")
         return
     try:
         if os.path.exists('/dev/watchdog'):

@@ -361,18 +361,22 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         dir_pin: u8,
         lim_pin: u8,
         home_pos: f64,
+        min_bound: f64,
+        max_bound: f64,
         step_val: f64,
         step_sign: f64,
         seek_high: bool,
         backoff_high: bool,
         triggered: bool,
-        timed_out: bool,
+        sensor_hit: bool,
     }
 
-    let (x_min, z_max, homing_hz) = {
+    let (x_min, x_max, z_min, z_max, homing_hz) = {
         let s = ctx.state.read().unwrap();
         (
             s.x_min as f64,
+            s.x_max as f64,
+            s.z_min as f64,
             s.z_max as f64,
             s.homing_speed_hz.clamp(150.0, 800.0),
         )
@@ -389,12 +393,14 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 dir_pin: ctx.x_stepper.dir_pin,
                 lim_pin: 17, // LIM_X_A
                 home_pos: x_min,
+                min_bound: x_min,
+                max_bound: x_max,
                 step_val: 1.0 / ctx.x_stepper.steps_per_unit,
                 step_sign: -1.0,
                 seek_high: false,
                 backoff_high: true,
                 triggered: false,
-                timed_out: false,
+                sensor_hit: false,
             });
         } else {
             ctx.gpio.write_pin(ctx.z_stepper.ena_pin, false);
@@ -405,12 +411,14 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 dir_pin: ctx.z_stepper.dir_pin,
                 lim_pin: 22, // LIM_Z_D
                 home_pos: z_max,
+                min_bound: z_min,
+                max_bound: z_max,
                 step_val: 1.0 / ctx.z_stepper.steps_per_unit,
                 step_sign: 1.0,
                 seek_high: true,
                 backoff_high: false,
                 triggered: false,
-                timed_out: false,
+                sensor_hit: false,
             });
         }
     }
@@ -433,6 +441,9 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 ctx.gpio.write_pin(cfg.pul_pin, true);
                 thread::sleep(Duration::from_micros(6));
                 ctx.gpio.write_pin(cfg.pul_pin, false);
+                let pos = (cfg.stepper.current_pos() - cfg.step_sign * cfg.step_val)
+                    .clamp(cfg.min_bound, cfg.max_bound);
+                cfg.stepper.set_position(pos);
                 pre_steps += 1;
                 thread::sleep(Duration::from_micros(pre_us));
             }
@@ -443,16 +454,20 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 ctx.gpio.write_pin(cfg.pul_pin, true);
                 thread::sleep(Duration::from_micros(6));
                 ctx.gpio.write_pin(cfg.pul_pin, false);
+                let pos = (cfg.stepper.current_pos() - cfg.step_sign * cfg.step_val)
+                    .clamp(cfg.min_bound, cfg.max_bound);
+                cfg.stepper.set_position(pos);
                 thread::sleep(Duration::from_micros(pre_us));
             }
         }
     }
 
-    // 階段 B: 平穩逼近原點
+    // 階段 B: 平穩逼近原點（嚴格限制不超出設定之上下限 x_min / z_max）
     let seek_us = (1_000_000.0 / homing_hz) as u64;
     for cfg in &mut cfgs {
         ctx.gpio.write_pin(cfg.dir_pin, cfg.seek_high);
         cfg.triggered = false;
+        cfg.sensor_hit = false;
     }
 
     for _ in 0..20000 {
@@ -463,9 +478,19 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         let mut active_indices = Vec::new();
         for (idx, cfg) in cfgs.iter_mut().enumerate() {
             if !cfg.triggered {
-                if !ctx.gpio.read_pin(cfg.lim_pin) {
+                let cur_pos = cfg.stepper.current_pos();
+                let pin_low = !ctx.gpio.read_pin(cfg.lim_pin);
+                let reached_soft_limit = if cfg.step_sign > 0.0 {
+                    cur_pos >= cfg.home_pos
+                } else {
+                    cur_pos <= cfg.home_pos
+                };
+
+                if pin_low || reached_soft_limit {
                     cfg.triggered = true;
-                    {
+                    cfg.sensor_hit = pin_low;
+                    cfg.stepper.set_position(cfg.home_pos);
+                    if pin_low {
                         let mut s = ctx.state.write().unwrap();
                         if cfg.name == "x" {
                             s.lim_x_a = true;
@@ -474,11 +499,17 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                             s.lim_z_d = true;
                             s.lim_up = true;
                         }
+                        drop(s);
+                        ctx.add_history(
+                            format!("{} 軸平穩觸發現位接近開關", cfg.name.to_uppercase()),
+                            "info",
+                        );
+                    } else {
+                        ctx.add_history(
+                            format!("{} 軸已到達設定歸零上限/原點座標 ({:.0} µs)", cfg.name.to_uppercase(), cfg.home_pos),
+                            "info",
+                        );
                     }
-                    ctx.add_history(
-                        format!("{} 軸平穩觸發現位接近開關", cfg.name.to_uppercase()),
-                        "info",
-                    );
                 } else {
                     ctx.gpio.write_pin(cfg.pul_pin, true);
                     active_indices.push(idx);
@@ -492,47 +523,43 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         for idx in active_indices {
             let cfg = &cfgs[idx];
             ctx.gpio.write_pin(cfg.pul_pin, false);
-            let pos = cfg.stepper.current_pos() + cfg.step_sign * cfg.step_val;
+            let pos = (cfg.stepper.current_pos() + cfg.step_sign * cfg.step_val)
+                .clamp(cfg.min_bound, cfg.max_bound);
             cfg.stepper.set_position(pos);
         }
         thread::sleep(Duration::from_micros(seek_us));
     }
 
-    // 階段 C: 精準退開至開關釋放
+    // 階段 C: 精準退開至開關釋放，並強制鎖定座標於 home_pos (絕不超過上限)
     for cfg in &mut cfgs {
-        if !cfg.triggered {
-            cfg.timed_out = true;
-            ctx.add_history(
-                format!("{} 軸歸零警告: 超時未觸發接近開關", cfg.name.to_uppercase()),
-                "warn",
-            );
-            continue;
-        }
         if ctx.homing_abort.load(Ordering::Relaxed) {
             return;
         }
-        ctx.gpio.write_pin(cfg.dir_pin, cfg.backoff_high);
-        let mut bo_steps = 0;
-        while !ctx.gpio.read_pin(cfg.lim_pin) && bo_steps < 2000 {
-            if ctx.homing_abort.load(Ordering::Relaxed) {
-                return;
+        if cfg.sensor_hit && !ctx.gpio.read_pin(cfg.lim_pin) {
+            ctx.gpio.write_pin(cfg.dir_pin, cfg.backoff_high);
+            let mut bo_steps = 0;
+            while !ctx.gpio.read_pin(cfg.lim_pin) && bo_steps < 2000 {
+                if ctx.homing_abort.load(Ordering::Relaxed) {
+                    return;
+                }
+                ctx.gpio.write_pin(cfg.pul_pin, true);
+                thread::sleep(Duration::from_micros(6));
+                ctx.gpio.write_pin(cfg.pul_pin, false);
+                bo_steps += 1;
+                thread::sleep(Duration::from_micros(pre_us));
             }
-            ctx.gpio.write_pin(cfg.pul_pin, true);
-            thread::sleep(Duration::from_micros(6));
-            ctx.gpio.write_pin(cfg.pul_pin, false);
-            bo_steps += 1;
-            thread::sleep(Duration::from_micros(pre_us));
-        }
-        for _ in 0..25 {
-            if ctx.homing_abort.load(Ordering::Relaxed) {
-                return;
+            for _ in 0..25 {
+                if ctx.homing_abort.load(Ordering::Relaxed) {
+                    return;
+                }
+                ctx.gpio.write_pin(cfg.pul_pin, true);
+                thread::sleep(Duration::from_micros(6));
+                ctx.gpio.write_pin(cfg.pul_pin, false);
+                thread::sleep(Duration::from_micros(pre_us));
             }
-            ctx.gpio.write_pin(cfg.pul_pin, true);
-            thread::sleep(Duration::from_micros(6));
-            ctx.gpio.write_pin(cfg.pul_pin, false);
-            thread::sleep(Duration::from_micros(pre_us));
         }
         cfg.stepper.set_position(cfg.home_pos);
+        cfg.stepper.set_target(cfg.home_pos, cfg.min_bound, cfg.max_bound);
         {
             let mut s = ctx.state.write().unwrap();
             if cfg.name == "x" {
@@ -544,7 +571,7 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
             }
         }
         ctx.add_history(
-            format!("{} 軸平穩歸零完成 (已精準校準原點)", cfg.name.to_uppercase()),
+            format!("{} 軸平穩歸零完成 (已精準校準原點 {:.0} µs)", cfg.name.to_uppercase(), cfg.home_pos),
             "success",
         );
     }
@@ -588,3 +615,4 @@ fn execute_simulation_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         }
     }
 }
+

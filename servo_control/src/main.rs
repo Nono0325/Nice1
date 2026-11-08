@@ -59,26 +59,8 @@ fn spawn_broadcast_loop(ctx: Arc<AppContext>) {
                 let z_min_f = s.z_min as f64;
                 let z_max_f = s.z_max as f64;
 
-                s.x_pulse = x_pos.round() as i64;
-                s.x_pct = (((x_pos - x_min_f) / (x_max_f - x_min_f).max(1.0)) * 100.0)
-                    .clamp(0.0, 100.0);
-                s.x_mm = ((s.x_min_mm + ((x_pos - x_min_f).max(0.0) / s.x_scale.max(0.001)))
-                    * 10.0)
-                    .round()
-                    / 10.0;
-
-                s.z_pulse = z_pos.round() as i64;
-                s.z_pct = (((z_pos - z_min_f) / (z_max_f - z_min_f).max(1.0)) * 100.0)
-                    .clamp(0.0, 100.0);
-                s.z_mm = ((s.z_min_mm + ((z_pos - z_min_f).max(0.0) / s.z_scale.max(0.001)))
-                    * 10.0)
-                    .round()
-                    / 10.0;
-
-                s.y1_pulse = s.z_pulse;
-                s.y2_pulse = s.z_pulse;
-                s.y_pct = s.z_pct;
-                s.y_mm = s.z_mm;
+                let x_clamped = x_pos.clamp(x_min_f, x_max_f);
+                let z_clamped = z_pos.clamp(z_min_f, z_max_f);
 
                 s.x_max_mm = ((s.x_min_mm + (x_max_f - x_min_f) / s.x_scale.max(0.001)) * 10.0)
                     .round()
@@ -88,6 +70,27 @@ fn spawn_broadcast_loop(ctx: Arc<AppContext>) {
                     / 10.0;
                 s.y_min_mm = s.z_min_mm;
                 s.y_max_mm = s.z_max_mm;
+
+                s.x_pulse = x_clamped.round() as i64;
+                s.x_pct = (((x_clamped - x_min_f) / (x_max_f - x_min_f).max(1.0)) * 100.0)
+                    .clamp(0.0, 100.0);
+                s.x_mm = (((s.x_min_mm + (x_clamped - x_min_f) / s.x_scale.max(0.001)) * 10.0)
+                    .round()
+                    / 10.0)
+                    .clamp(s.x_min_mm, s.x_max_mm);
+
+                s.z_pulse = z_clamped.round() as i64;
+                s.z_pct = (((z_clamped - z_min_f) / (z_max_f - z_min_f).max(1.0)) * 100.0)
+                    .clamp(0.0, 100.0);
+                s.z_mm = (((s.z_min_mm + (z_clamped - z_min_f) / s.z_scale.max(0.001)) * 10.0)
+                    .round()
+                    / 10.0)
+                    .clamp(s.z_min_mm, s.z_max_mm);
+
+                s.y1_pulse = s.z_pulse;
+                s.y2_pulse = s.z_pulse;
+                s.y_pct = s.z_pct;
+                s.y_mm = s.z_mm;
 
                 s.timestamp = Local::now().format("%H:%M:%S%.3f").to_string();
                 s.uptime_sec = ctx.start_instant.elapsed().as_secs();

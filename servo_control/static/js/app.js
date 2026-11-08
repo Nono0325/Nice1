@@ -286,10 +286,6 @@ function scheduleUIUpdate() {
   requestAnimationFrame(() => {
     uiUpdatePending = false;
     updateUI();
-    const simTab = document.getElementById('tab-content-simulation3d');
-    if (simTab && simTab.classList.contains('active') && typeof update3D === 'function') {
-      update3D(state);
-    }
   });
 }
 
@@ -621,14 +617,16 @@ function updateUI() {
   }
 
   // 範圍設定顯示 (同時顯示 µs 與 mm)
-  const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : 0.0;
-  const xMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : ((s.x_max - s.x_min) / Math.max(0.001, xScale));
-  const yMinMm = s.z_min_mm !== undefined ? s.z_min_mm : (s.y_min_mm !== undefined ? s.y_min_mm : 0.0);
-  const yMaxMm = s.z_max_mm !== undefined ? s.z_max_mm : (s.y_max_mm !== undefined ? s.y_max_mm : ((s.y_max - s.y_min) / Math.max(0.001, zScale)));
+  const zMinUs = s.z_min !== undefined ? s.z_min : s.y_min;
+  const zMaxUs = s.z_max !== undefined ? s.z_max : s.y_max;
+  const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : Math.max(0, (s.x_min - 500) / Math.max(0.001, xScale));
+  const xMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : (xMinMm + (s.x_max - s.x_min) / Math.max(0.001, xScale));
+  const yMinMm = s.z_min_mm !== undefined ? s.z_min_mm : (s.y_min_mm !== undefined ? s.y_min_mm : Math.max(0, (zMinUs - 500) / Math.max(0.001, zScale)));
+  const yMaxMm = s.z_max_mm !== undefined ? s.z_max_mm : (s.y_max_mm !== undefined ? s.y_max_mm : (yMinMm + (zMaxUs - zMinUs) / Math.max(0.001, zScale)));
 
   const curXRangeUs = s.x_max - s.x_min;
   const curXRangeMm = (xMaxMm - xMinMm).toFixed(1);
-  const curYRangeUs = (s.z_max || s.y_max) - (s.z_min || s.y_min);
+  const curYRangeUs = zMaxUs - zMinUs;
   const curYRangeMm = (yMaxMm - yMinMm).toFixed(1);
 
   setElText('curXMin', `${s.x_min}`);
@@ -636,35 +634,38 @@ function updateUI() {
   setElText('curXRangeMmLabel', `(${xMinMm.toFixed(1)} ~ ${xMaxMm.toFixed(1)} mm)`);
   setElText('curXRange', `${curXRangeUs} µs (${curXRangeMm} mm)`);
 
-  setElText('curYMin', `${s.z_min !== undefined ? s.z_min : s.y_min}`);
-  setElText('curYMax', `${s.z_max !== undefined ? s.z_max : s.y_max}`);
+  setElText('curYMin', `${zMinUs}`);
+  setElText('curYMax', `${zMaxUs}`);
   setElText('curYRangeMmLabel', `(${yMinMm.toFixed(1)} ~ ${yMaxMm.toFixed(1)} mm)`);
   setElText('curYRange', `${curYRangeUs} µs (${curYRangeMm} mm)`);
 
-  // 同步更新控制面板 X 軸與 Z 軸位置條刻度標籤
-  const xMidMm = ((xMinMm + xMaxMm) / 2).toFixed(1);
-  const xQ1Mm  = (xMinMm + (xMaxMm - xMinMm) * 0.25).toFixed(0);
-  const xQ3Mm  = (xMinMm + (xMaxMm - xMinMm) * 0.75).toFixed(0);
-  setElText('xBarLblLeft',  `${xMinMm.toFixed(1)} mm (a點: 歸零)`);
-  setElText('xBarLblMid',   `${xMidMm} mm (b點: 中間模具位)`);
-  setElText('xBarLblRight', `${xMaxMm.toFixed(1)} mm (c點: 右極限放料)`);
-  setElText('xTick0', `a點 (${xMinMm.toFixed(0)} mm)`);
-  setElText('xTick1', `${xQ1Mm} mm`);
-  setElText('xTick2', `b點 (${parseFloat(xMidMm).toFixed(0)} mm)`);
-  setElText('xTick3', `${xQ3Mm} mm`);
-  setElText('xTick4', `c點 (${xMaxMm.toFixed(0)} mm)`);
+  // 同步更新控制面板 X 軸與 Y/Z 軸位置條刻度標籤 (完全配合設定之 mm 與 µs 範圍)
+  const fmtScaleMm = (v) => Number.isInteger(Number(v.toFixed(1))) ? v.toFixed(0) : v.toFixed(1);
+  const xMidMm = (xMinMm + xMaxMm) / 2;
+  const xQ1Mm  = xMinMm + (xMaxMm - xMinMm) * 0.25;
+  const xQ3Mm  = xMinMm + (xMaxMm - xMinMm) * 0.75;
+  const xMidUs = Math.round((s.x_min + s.x_max) / 2);
+  setElText('xBarLblLeft',  `${fmtScaleMm(xMinMm)} mm / ${s.x_min} µs (a點: 歸零)`);
+  setElText('xBarLblMid',   `${fmtScaleMm(xMidMm)} mm / ${xMidUs} µs (b點: 中間位)`);
+  setElText('xBarLblRight', `${fmtScaleMm(xMaxMm)} mm / ${s.x_max} µs (c點: 右極限)`);
+  setElText('xTick0', `a點 (${fmtScaleMm(xMinMm)} mm)`);
+  setElText('xTick1', `${fmtScaleMm(xQ1Mm)} mm`);
+  setElText('xTick2', `b點 (${fmtScaleMm(xMidMm)} mm)`);
+  setElText('xTick3', `${fmtScaleMm(xQ3Mm)} mm`);
+  setElText('xTick4', `c點 (${fmtScaleMm(xMaxMm)} mm)`);
 
-  const yMidMm = ((yMinMm + yMaxMm) / 2).toFixed(1);
-  const yQ1Mm  = (yMinMm + (yMaxMm - yMinMm) * 0.25).toFixed(0);
-  const yQ3Mm  = (yMinMm + (yMaxMm - yMinMm) * 0.75).toFixed(0);
-  setElText('yBarLblLeft',  `${yMinMm.toFixed(1)} mm (e點: 向下極限/取料面)`);
-  setElText('yBarLblMid',   `${yMidMm} mm (50% 避讓高度)`);
-  setElText('yBarLblRight', `${yMaxMm.toFixed(1)} mm (d點: 向上歸零/安全高度)`);
-  setElText('yTick0', `e點 (${yMinMm.toFixed(0)} mm)`);
-  setElText('yTick1', `${yQ1Mm} mm`);
-  setElText('yTick2', `50% (${parseFloat(yMidMm).toFixed(0)} mm)`);
-  setElText('yTick3', `${yQ3Mm} mm`);
-  setElText('yTick4', `d點 (${yMaxMm.toFixed(0)} mm)`);
+  const yMidMm = (yMinMm + yMaxMm) / 2;
+  const yQ1Mm  = yMinMm + (yMaxMm - yMinMm) * 0.25;
+  const yQ3Mm  = yMinMm + (yMaxMm - yMinMm) * 0.75;
+  const zMidUs = Math.round((zMinUs + zMaxUs) / 2);
+  setElText('yBarLblLeft',  `${fmtScaleMm(yMinMm)} mm / ${zMinUs} µs (e點: 下極限)`);
+  setElText('yBarLblMid',   `${fmtScaleMm(yMidMm)} mm / ${zMidUs} µs (50% 高度)`);
+  setElText('yBarLblRight', `${fmtScaleMm(yMaxMm)} mm / ${zMaxUs} µs (d點: 上歸零)`);
+  setElText('yTick0', `e點 (${fmtScaleMm(yMinMm)} mm)`);
+  setElText('yTick1', `${fmtScaleMm(yQ1Mm)} mm`);
+  setElText('yTick2', `50% (${fmtScaleMm(yMidMm)} mm)`);
+  setElText('yTick3', `${fmtScaleMm(yQ3Mm)} mm`);
+  setElText('yTick4', `d點 (${fmtScaleMm(yMaxMm)} mm)`);
 
   // GPIO 模式橫幅（診斷頁）
   const modeTitle = document.getElementById('diagModeTitle');
@@ -683,6 +684,10 @@ function updateUI() {
 
   // Chart.js 更新（僅在訊號檢測分頁啟用時重繪圖表，降低瀏覽器主執行緒負載）
   if (s.pwm_history && chartX && chartY) {
+    chartX.options.scales.y.min = Math.max(0, s.x_min - 100);
+    chartX.options.scales.y.max = s.x_max + 100;
+    chartY.options.scales.y.min = Math.max(0, zMinUs - 100);
+    chartY.options.scales.y.max = zMaxUs + 100;
     chartX.data.datasets[0].data = [...s.pwm_history.x];
     chartY.data.datasets[0].data = [...s.pwm_history.y1];
     chartY.data.datasets[1].data = [...s.pwm_history.y2];
@@ -694,9 +699,9 @@ function updateUI() {
   }
 
   // 位置 tag 更新
-  updateMotorTag('tagX',  s.x_pulse,  s.x_min,  s.x_max);
-  updateMotorTag('tagY1', s.y1_pulse, s.y_min,  s.y_max);
-  updateMotorTag('tagY2', s.y2_pulse, s.y_min,  s.y_max);
+  updateMotorTag('tagX',  s.x_pulse, s.x_min, s.x_max);
+  updateMotorTag('tagY1', zPulse,    zMinUs,  zMaxUs);
+  updateMotorTag('tagY2', zPulse,    zMinUs,  zMaxUs);
 
   // 歸零中：禁用所有歸零按鈕防止重覆觸發
   const homing = !!s.is_homing;
@@ -762,14 +767,6 @@ function switchTab(name) {
 
   if (name === 'gcode') {
     drawGcodePath();
-  }
-
-  if (name === 'simulation3d') {
-    init3D();
-    setTimeout(() => {
-      if (typeof onWindowResize === 'function') onWindowResize();
-      if (typeof update3D === 'function') update3D(state);
-    }, 80);
   }
 
   if (name === 'terminal') {
@@ -946,7 +943,7 @@ async function applyXLimits() {
     return;
   }
   let payload = {};
-  const isMm = unitMode === 'mm' || (unitMode === 'auto' && xMaxVal <= 400);
+  const isMm = unitMode === 'mm' || (unitMode === 'auto' && (xMinVal < 500 || xMaxVal <= 400));
   if (isMm) {
     payload = { x_min_mm: xMinVal, x_max_mm: xMaxVal };
   } else {
@@ -976,7 +973,7 @@ async function applyYLimits() {
     return;
   }
   let payload = {};
-  const isMm = unitMode === 'mm' || (unitMode === 'auto' && yMaxVal <= 400);
+  const isMm = unitMode === 'mm' || (unitMode === 'auto' && (yMinVal < 500 || yMaxVal <= 400));
   if (isMm) {
     payload = { y_min_mm: yMinVal, y_max_mm: yMaxVal, y_sync: sync };
   } else {

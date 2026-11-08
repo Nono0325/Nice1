@@ -586,14 +586,18 @@ def _execute_hardware_homing(target_axes):
         if ax == 'x':
             lim_pin = PIN['LIM_X_A']
             state_key = 'lim_x_a'
-            home_pos = state['x_min']
+            home_pos = float(state['x_min'])
+            min_bound = float(state['x_min'])
+            max_bound = float(state['x_max'])
             seek_dir = GPIO.LOW      # 負方向朝 a 點歸零
             backoff_dir = GPIO.HIGH  # 正方向退開
             step_sign = -1.0
         else: # z or y
             lim_pin = PIN['LIM_Z_D']
             state_key = 'lim_z_d'
-            home_pos = state.get('z_max', state['y_max'])
+            home_pos = float(state.get('z_max', state['y_max']))
+            min_bound = float(state.get('z_min', state['y_min']))
+            max_bound = float(state.get('z_max', state['y_max']))
             seek_dir = GPIO.HIGH     # 正方向朝 d 點向上歸零
             backoff_dir = GPIO.LOW   # 負方向向下退開
             step_sign = 1.0
@@ -609,11 +613,14 @@ def _execute_hardware_homing(target_axes):
             'lim_pin': lim_pin,
             'state_key': state_key,
             'home_pos': home_pos,
+            'min_bound': min_bound,
+            'max_bound': max_bound,
             'step_val': step_val,
             'step_sign': step_sign,
             'seek_dir': seek_dir,
             'backoff_dir': backoff_dir,
             'triggered': False,
+            'sensor_hit': False,
             'timed_out': False
         })
 
@@ -662,10 +669,17 @@ def _execute_hardware_homing(target_axes):
 
         for cfg in axis_configs:
             if not cfg['triggered']:
-                if not GPIO.input(cfg['lim_pin']):  # 觸發現位接近開關
+                pin_low = not GPIO.input(cfg['lim_pin'])  # 觸發現位接近開關
+                reached_soft_limit = (cfg['stepper'].current_pos >= cfg['home_pos']) if cfg['step_sign'] > 0 else (cfg['stepper'].current_pos <= cfg['home_pos'])
+                if pin_low or reached_soft_limit:
                     cfg['triggered'] = True
-                    state[cfg['state_key']] = True
-                    add_history(f"{cfg['name'].upper()} 軸平穩觸發現位接近開關", "info")
+                    cfg['sensor_hit'] = pin_low
+                    cfg['stepper'].set_position(cfg['home_pos'])
+                    if pin_low:
+                        state[cfg['state_key']] = True
+                        add_history(f"{cfg['name'].upper()} 軸平穩觸發現位接近開關", "info")
+                    else:
+                        add_history(f"{cfg['name'].upper()} 軸已達歸零軟體上限 ({int(cfg['home_pos'])} µs)，安全鎖定原點", "info")
                 else:
                     GPIO.output(cfg['pul_pin'], GPIO.HIGH)
                     active_pulse.append(cfg)
@@ -677,7 +691,8 @@ def _execute_hardware_homing(target_axes):
 
         for cfg in active_pulse:
             GPIO.output(cfg['pul_pin'], GPIO.LOW)
-            cfg['stepper'].current_pos += cfg['step_sign'] * cfg['step_val']
+            next_pos = cfg['stepper'].current_pos + cfg['step_sign'] * cfg['step_val']
+            cfg['stepper'].current_pos = max(cfg['min_bound'], min(cfg['max_bound'], next_pos))
 
         steps += 1
         time.sleep(max(0.0003, step_interval - 0.00001))
@@ -685,38 +700,40 @@ def _execute_hardware_homing(target_axes):
     for cfg in axis_configs:
         if not cfg['triggered']:
             cfg['timed_out'] = True
-            add_history(f"{cfg['name'].upper()} 軸歸零警告: 超時未觸發接近開關", "warn")
+            cfg['stepper'].set_position(cfg['home_pos'])
+            add_history(f"{cfg['name'].upper()} 軸歸零警告: 超時未觸發接近開關，已鎖定於上限 ({int(cfg['home_pos'])} µs)", "warn")
 
     # ── 階段 C: 精準退開至開關剛釋放 (Pull-off / Latch) ─────────────
     backoff_hz = 250.0
     backoff_interval = 1.0 / backoff_hz
     for cfg in axis_configs:
-        if cfg['timed_out'] or homing_abort_event.is_set():
+        if homing_abort_event.is_set():
             continue
 
-        GPIO.output(cfg['dir_pin'], cfg['backoff_dir'])
-        
-        bo_steps = 0
-        while not GPIO.input(cfg['lim_pin']) and bo_steps < 2000:
-            if homing_abort_event.is_set():
-                return
-            GPIO.output(cfg['pul_pin'], GPIO.HIGH)
-            time.sleep(0.00001)
-            GPIO.output(cfg['pul_pin'], GPIO.LOW)
-            bo_steps += 1
-            time.sleep(max(0.0005, backoff_interval - 0.00001))
+        if cfg.get('sensor_hit') and not GPIO.input(cfg['lim_pin']):
+            GPIO.output(cfg['dir_pin'], cfg['backoff_dir'])
+            
+            bo_steps = 0
+            while not GPIO.input(cfg['lim_pin']) and bo_steps < 2000:
+                if homing_abort_event.is_set():
+                    return
+                GPIO.output(cfg['pul_pin'], GPIO.HIGH)
+                time.sleep(0.00001)
+                GPIO.output(cfg['pul_pin'], GPIO.LOW)
+                bo_steps += 1
+                time.sleep(max(0.0005, backoff_interval - 0.00001))
 
-        for _ in range(25):
-            if homing_abort_event.is_set():
-                return
-            GPIO.output(cfg['pul_pin'], GPIO.HIGH)
-            time.sleep(0.00001)
-            GPIO.output(cfg['pul_pin'], GPIO.LOW)
-            time.sleep(max(0.0005, backoff_interval - 0.00001))
+            for _ in range(25):
+                if homing_abort_event.is_set():
+                    return
+                GPIO.output(cfg['pul_pin'], GPIO.HIGH)
+                time.sleep(0.00001)
+                GPIO.output(cfg['pul_pin'], GPIO.LOW)
+                time.sleep(max(0.0005, backoff_interval - 0.00001))
 
-        # 標記歸零點座標
+        # 標記歸零點座標並夾限保護，確保絕不超過上限
         cfg['stepper'].set_position(cfg['home_pos'])
-        cfg['stepper'].set_target(cfg['home_pos'])
+        cfg['stepper'].set_target(cfg['home_pos'], cfg['min_bound'], cfg['max_bound'])
         state[cfg['state_key']] = False
         add_history(f"{cfg['name'].upper()} 軸平穩歸零完成 (已精準校準原點)", "success")
 
@@ -826,32 +843,34 @@ def broadcast_state():
             # 同步實時馬達位置與百分比、物理 mm 座標至系統狀態中
             x_min_mm_base = float(state.get('x_min_mm', 0.0))
             z_min_mm_base = float(state.get('z_min_mm', 0.0))
+            state['x_max_mm'] = round(x_min_mm_base + (state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+            z_scale = state.get('z_scale', state['y_scale'])
+            state['z_max_mm'] = round(z_min_mm_base + (state.get('z_max', state['y_max']) - state.get('z_min', state['y_min'])) / max(0.001, z_scale), 1)
+            state['y_min_mm'] = z_min_mm_base
+            state['y_max_mm'] = state['z_max_mm']
+
             if x_stepper:
-                state['x_pulse'] = int(x_stepper.current_pos)
-                state['x_pct'] = max(0.0, min(100.0, (x_stepper.current_pos - state['x_min']) / max(1, state['x_max'] - state['x_min']) * 100.0))
-                state['x_mm'] = round(x_min_mm_base + max(0.0, (x_stepper.current_pos - state['x_min']) / max(0.001, state['x_scale'])), 1)
+                x_clamped = max(float(state['x_min']), min(float(state['x_max']), float(x_stepper.current_pos)))
+                state['x_pulse'] = int(round(x_clamped))
+                state['x_pct'] = max(0.0, min(100.0, (x_clamped - state['x_min']) / max(1, state['x_max'] - state['x_min']) * 100.0))
+                raw_x_mm = x_min_mm_base + max(0.0, (x_clamped - state['x_min']) / max(0.001, state['x_scale']))
+                state['x_mm'] = round(max(x_min_mm_base, min(state['x_max_mm'], raw_x_mm)), 1)
             
             st_z = z_stepper or y_stepper
             if st_z:
                 z_min = state.get('z_min', state['y_min'])
                 z_max = state.get('z_max', state['y_max'])
-                z_scale = state.get('z_scale', state['y_scale'])
-                state['z_pulse'] = int(st_z.current_pos)
-                state['z_pct'] = max(0.0, min(100.0, (st_z.current_pos - z_min) / max(1, z_max - z_min) * 100.0))
-                state['z_mm'] = round(z_min_mm_base + max(0.0, (st_z.current_pos - z_min) / max(0.001, z_scale)), 1)
+                z_clamped = max(float(z_min), min(float(z_max), float(st_z.current_pos)))
+                state['z_pulse'] = int(round(z_clamped))
+                state['z_pct'] = max(0.0, min(100.0, (z_clamped - z_min) / max(1, z_max - z_min) * 100.0))
+                raw_z_mm = z_min_mm_base + max(0.0, (z_clamped - z_min) / max(0.001, z_scale))
+                state['z_mm'] = round(max(z_min_mm_base, min(state['z_max_mm'], raw_z_mm)), 1)
 
                 # 同步保持 y 鍵名以確保所有舊版前端元件皆向下相容
                 state['y1_pulse'] = state['z_pulse']
                 state['y2_pulse'] = state['z_pulse']
                 state['y_pct'] = state['z_pct']
                 state['y_mm'] = state['z_mm']
-
-            # 計算當前 mm 極限（保留使用者設定之起點偏移）
-            state['x_max_mm'] = round(x_min_mm_base + (state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
-            z_scale = state.get('z_scale', state['y_scale'])
-            state['z_max_mm'] = round(z_min_mm_base + (state.get('z_max', state['y_max']) - state.get('z_min', state['y_min'])) / max(0.001, z_scale), 1)
-            state['y_min_mm'] = z_min_mm_base
-            state['y_max_mm'] = state['z_max_mm']
 
             read_limit_switches()
             state['timestamp'] = datetime.now().strftime('%H:%M:%S.%f')[:-3]
@@ -1791,8 +1810,8 @@ def api_set_limits():
         if 'x_max' in data:
             state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(data['x_max'])))))
         if 'x_min' in data or 'x_max' in data:
-            state['x_min_mm'] = 0.0
-            state['x_max_mm'] = round((state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+            state['x_min_mm'] = round(max(0.0, (state['x_min'] - PULSE_MIN) / max(0.001, state['x_scale'])), 1)
+            state['x_max_mm'] = round(state['x_min_mm'] + (state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
 
     # 若 X 軸當前位置超出新設定之範圍，安全夾限至範圍內
     if x_stepper:
@@ -1824,8 +1843,8 @@ def api_set_limits():
             state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(val)))))
         if 'z_min' in data or 'y_min' in data or 'z_max' in data or 'y_max' in data:
             scale = state.get('z_scale', state['y_scale'])
-            state['z_min_mm'] = state['y_min_mm'] = 0.0
-            state['z_max_mm'] = state['y_max_mm'] = round((state['z_max'] - state['z_min']) / max(0.001, scale), 1)
+            state['z_min_mm'] = state['y_min_mm'] = round(max(0.0, (state['z_min'] - PULSE_MIN) / max(0.001, scale)), 1)
+            state['z_max_mm'] = state['y_max_mm'] = round(state['z_min_mm'] + (state['z_max'] - state['z_min']) / max(0.001, scale), 1)
 
     st_z = z_stepper or y_stepper
     if st_z:

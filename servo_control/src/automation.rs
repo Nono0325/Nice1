@@ -789,3 +789,4 @@ pub fn spawn_macro_runner(ctx: Arc<AppContext>, commands: Vec<String>) {
         ctx.add_history("🧩 積木/巨集程式執行結束", "success");
     });
 }
+

@@ -504,9 +504,13 @@ pub async fn api_set_limits(
                 changed_us = true;
             }
             if changed_us {
-                s.x_min_mm = 0.0;
-                s.x_max_mm =
-                    (((s.x_max - s.x_min) as f64 / s.x_scale.max(0.001)) * 10.0).round() / 10.0;
+                s.x_min_mm =
+                    (((s.x_min - PULSE_MIN).max(0) as f64 / s.x_scale.max(0.001)) * 10.0).round()
+                        / 10.0;
+                s.x_max_mm = ((s.x_min_mm + (s.x_max - s.x_min) as f64 / s.x_scale.max(0.001))
+                    * 10.0)
+                    .round()
+                    / 10.0;
             }
         }
 
@@ -558,10 +562,14 @@ pub async fn api_set_limits(
                 changed_us = true;
             }
             if changed_us {
-                s.z_min_mm = 0.0;
-                s.y_min_mm = 0.0;
-                let r_max =
-                    (((s.z_max - s.z_min) as f64 / s.z_scale.max(0.001)) * 10.0).round() / 10.0;
+                let r_min =
+                    (((s.z_min - PULSE_MIN).max(0) as f64 / s.z_scale.max(0.001)) * 10.0).round()
+                        / 10.0;
+                let r_max = ((r_min + (s.z_max - s.z_min) as f64 / s.z_scale.max(0.001)) * 10.0)
+                    .round()
+                    / 10.0;
+                s.z_min_mm = r_min;
+                s.y_min_mm = r_min;
                 s.z_max_mm = r_max;
                 s.y_max_mm = r_max;
             }

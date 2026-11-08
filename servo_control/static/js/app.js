@@ -3,15 +3,115 @@
  * Raspberry Pi Servo Motor Controller - Frontend App
  */
 
-// ── WebSocket 連線（高穩定自動重連配置 + HTTP 備援）──────────────────
-const socket = io({
-  transports: ['websocket', 'polling'],
-  reconnection: true,
-  reconnectionDelay: 500,
-  reconnectionDelayMax: 3000,
-  reconnectionAttempts: Infinity,
-  timeout: 20000
-});
+// ── 原生 Rust WebSocket (/ws) 高速連線引擎（向下相容 Socket.IO + HTTP 備援）──
+function createRustSocket() {
+  const listeners = {};
+  let ws = null;
+  let sio = null;
+  let wsFailCount = 0;
+  let reconnectTimer = null;
+
+  const trigger = (event, payload) => {
+    const cbs = listeners[event] || [];
+    for (const fn of cbs) {
+      try { fn(payload); } catch (err) { console.error('[WS Handler Error]', err); }
+    }
+  };
+
+  const client = {
+    connected: false,
+    on(event, callback) {
+      if (!listeners[event]) listeners[event] = [];
+      listeners[event].push(callback);
+      if (sio) sio.on(event, callback);
+    },
+    emit(event, data) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ event, data }));
+      } else if (sio && sio.connected) {
+        sio.emit(event, data);
+      }
+    }
+  };
+
+  function connectNativeWs() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${proto}//${window.location.host}/ws`;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      scheduleReconnect();
+      return;
+    }
+
+    ws.onopen = () => {
+      wsFailCount = 0;
+      client.connected = true;
+      trigger('connect');
+    };
+
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg && msg.event) {
+          trigger(msg.event, msg.data);
+        }
+      } catch (e) {
+        // 忽略非 JSON 訊框
+      }
+    };
+
+    ws.onclose = () => {
+      if (client.connected) {
+        client.connected = false;
+        trigger('disconnect');
+      }
+      wsFailCount++;
+      if (wsFailCount >= 3 && typeof window.io === 'function' && !sio) {
+        initSocketIoFallback();
+      } else {
+        scheduleReconnect();
+      }
+    };
+
+    ws.onerror = () => {
+      try { ws.close(); } catch (_) {}
+    };
+  }
+
+  function scheduleReconnect() {
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(connectNativeWs, 800);
+    }
+  }
+
+  function initSocketIoFallback() {
+    try {
+      sio = window.io({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 3000
+      });
+      Object.keys(listeners).forEach(ev => {
+        listeners[ev].forEach(cb => sio.on(ev, cb));
+      });
+      sio.on('connect', () => { client.connected = true; });
+      sio.on('disconnect', () => { client.connected = false; });
+    } catch (e) {
+      scheduleReconnect();
+    }
+  }
+
+  connectNativeWs();
+  return client;
+}
+
+const socket = createRustSocket();
 
 // ── 全域狀態 ──────────────────────────────────────────────────
 let state = {

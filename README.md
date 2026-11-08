@@ -3,11 +3,10 @@
 > **工業級衝壓自動化系統** — 樹梅派 X/Z 軸步進馬達控制器 (QN-1805-E1 方形電感接近開關 + LSD-P25/20 圓形強力直流電磁鐵 + 手臂霍爾檢測) + 雙向 WebSocket 即時監控 + Three.js 3D 數位分身模擬 + G-code/巨集編輯器 + Web 系統終端機 + OTA 線上更新
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Nono0325%2FNice1-181717?logo=github)](https://github.com/Nono0325/Nice1)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.x-000000?logo=flask)](https://flask.palletsprojects.com)
-[![Socket.IO](https://img.shields.io/badge/Socket.IO-4.x-010101?logo=socketdotio)](https://socket.io)
+[![Rust](https://img.shields.io/badge/Rust-2021%20Edition-DE522D?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Axum](https://img.shields.io/badge/Axum-0.7%20Tokio-000000?logo=rust)](https://github.com/tokio-rs/axum)
+[![rppal](https://img.shields.io/badge/GPIO-rppal%200.19-C51A4A?logo=raspberry-pi)](https://docs.rs/rppal)
 [![Three.js](https://img.shields.io/badge/Three.js-r128-000000?logo=threedotjs)](https://threejs.org)
-[![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-GPIO%20%2F%20pigpio-C51A4A?logo=raspberry-pi)](https://www.raspberrypi.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
@@ -40,11 +39,8 @@ wget -qO- https://raw.githubusercontent.com/Nono0325/Nice1/main/servo_control/in
 git clone https://github.com/Nono0325/Nice1.git
 cd Nice1/servo_control
 
-# 2. 安裝相依套件
-pip install -r requirements.txt
-
-# 3. 啟動主程式
-python servo_controller.py
+# 2. 編譯並啟動 Rust 控制伺服器 (自動偵測環境：樹莓派啟用 rppal 硬體 GPIO，PC 啟用模擬模式)
+cargo run --release
 ```
 
 開啟瀏覽器造訪：`http://localhost:5000`  

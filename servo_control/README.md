@@ -32,8 +32,7 @@ wget -qO- https://raw.githubusercontent.com/Nono0325/Nice1/main/servo_control/in
 ```bash
 git clone https://github.com/Nono0325/Nice1.git
 cd Nice1/servo_control
-pip install -r requirements.txt
-python servo_controller.py
+cargo run --release
 ```
 
 瀏覽器開啟：`http://localhost:5000`  

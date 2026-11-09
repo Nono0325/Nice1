@@ -365,7 +365,8 @@ class StepperMotor:
                 if not IS_RASPBERRY_PI:
                     # 模擬模式：以 50Hz 平滑步進精確模擬運動，杜絕 Windows timer 睡眠延遲與高 CPU 占用
                     time.sleep(0.02)
-                    step_chunk = min(abs(diff), (self.current_speed_hz / self.steps_per_unit) * 0.02)
+                    self.current_speed_hz = self.max_speed_hz
+                    step_chunk = min(abs(diff), (self.max_speed_hz / self.steps_per_unit) * 0.02)
                     if diff > 0:
                         self.current_pos += step_chunk
                     else:

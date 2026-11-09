@@ -801,15 +801,33 @@ def _execute_hardware_homing(target_axes):
         add_history(f"{cfg['name'].upper()} 軸平穩歸零完成 (坐標點已精準歸零：0.0 mm / 0 µs)", "success")
 
 def _execute_simulation_homing(target_axes):
-    """模擬環境平滑歸零核心 (X回a點, Z回d點)"""
+    """模擬環境平滑歸零核心 (就算坐標系為 0 亦可隨時完整執行退開與歸零)"""
     global x_stepper, z_stepper, y_stepper, homing_abort_event
     
+    # 檢查是否已有軸處於 0 點，若已在 0 點則先執行預先安全退開
+    need_backoff = False
+    for ax in target_axes:
+        st = x_stepper if ax == 'x' else (z_stepper or y_stepper)
+        if abs(float(st.current_pos)) < 5.0:
+            need_backoff = True
+            break
+
+    if need_backoff:
+        add_history("當前座標已在原點 (0.0)，執行預先安全退開再重新定標歸零...", "info")
+        for i in range(10):
+            if homing_abort_event.is_set():
+                return
+            r = (i + 1) / 10.0
+            for ax in target_axes:
+                st = x_stepper if ax == 'x' else (z_stepper or y_stepper)
+                st.current_pos = 100.0 * r
+            time.sleep(0.015)
+        time.sleep(0.04)
+
     start_positions = {}
-    target_positions = {}
     for ax in target_axes:
         st = x_stepper if ax == 'x' else (z_stepper or y_stepper)
         start_positions[ax] = float(st.current_pos)
-        target_positions[ax] = 0.0
 
     steps_cnt = 20
     for i in range(steps_cnt):

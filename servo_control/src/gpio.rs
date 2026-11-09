@@ -577,13 +577,14 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         }
     }
 
-    // 階段 A: 若已壓在接近開關或霍爾開關上，先退開
+    // 階段 A: 若開關已被觸發（或已在原點），先向正方向安全退開建立逼近行程
     let backoff_hz = (homing_hz * 0.5).clamp(300.0, 2000.0);
     let pre_us = ((1_000_000.0 / backoff_hz) as u64).saturating_sub(4).max(20);
     for cfg in &cfgs {
         let is_sensor_pressed = || -> bool {
             let lim_pressed = !ctx.gpio.read_pin(cfg.lim_pin);
-            let hall_pressed = !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7);
+            let hall_pressed = (cfg.name == "x" && (!ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)))
+                || (cfg.name == "z" && (!ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7) || !ctx.gpio.read_pin(8) || !ctx.gpio.read_pin(9)));
             lim_pressed || hall_pressed
         };
 
@@ -602,28 +603,24 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 ctx.gpio.write_pin(cfg.pul_pin, true);
                 delay_micros(4);
                 ctx.gpio.write_pin(cfg.pul_pin, false);
-                let pos = (cfg.stepper.current_pos() - cfg.step_sign * cfg.step_val)
-                    .clamp(cfg.min_bound, cfg.max_bound);
-                cfg.stepper.set_position(pos);
                 pre_steps += 1;
                 delay_micros(pre_us);
             }
-            for _ in 0..80 {
+            // 額外多退 100 步作安全淨空，確保感測器完全脫開
+            for _ in 0..100 {
                 if ctx.homing_abort.load(Ordering::Relaxed) {
                     return;
                 }
                 ctx.gpio.write_pin(cfg.pul_pin, true);
                 delay_micros(4);
                 ctx.gpio.write_pin(cfg.pul_pin, false);
-                let pos = (cfg.stepper.current_pos() - cfg.step_sign * cfg.step_val)
-                    .clamp(cfg.min_bound, cfg.max_bound);
-                cfg.stepper.set_position(pos);
                 delay_micros(pre_us);
             }
+            cfg.stepper.set_position(50.0);
         }
     }
 
-    // 階段 B: 平穩逼近原點（硬體級尋找真實霍爾/接近開關觸發，絕不因未校準之軟體座標提前停止）
+    // 階段 B: 平穩逼近原點（無論目前坐標是否為 0，皆持續發送脈衝尋找實體霍爾/接近開關）
     let seek_us = ((1_000_000.0 / homing_hz) as u64).saturating_sub(4).max(10);
     for cfg in &mut cfgs {
         ctx.gpio.write_pin(cfg.dir_pin, cfg.seek_high);
@@ -684,9 +681,9 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         for idx in active_indices {
             let cfg = &cfgs[idx];
             ctx.gpio.write_pin(cfg.pul_pin, false);
-            let pos = (cfg.stepper.current_pos() + cfg.step_sign * cfg.step_val)
-                .clamp(cfg.min_bound, cfg.max_bound);
-            cfg.stepper.set_position(pos);
+            // 歸零尋找過程中，不受 min_bound: 0.0 箝位限制，馬達自由向原點行進
+            let cur = cfg.stepper.current_pos();
+            cfg.stepper.set_position((cur - cfg.step_val).max(0.0));
         }
         delay_micros(seek_us);
     }
@@ -761,6 +758,31 @@ fn execute_simulation_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
     let start_x = ctx.x_stepper.current_pos();
     let start_z = ctx.z_stepper.current_pos();
 
+    // 就算坐標系目前是 0，也先向正方向安全退開再重新逼近原點，保證隨時點擊歸零皆能完整執行
+    let need_sim_backoff = start_x.abs() < 5.0 || start_z.abs() < 5.0;
+    if need_sim_backoff {
+        ctx.add_history("當前座標已在原點 (0.0)，執行預先安全退開再重新定標歸零...", "info");
+        let backoff_steps = 10;
+        for i in 1..=backoff_steps {
+            if ctx.homing_abort.load(Ordering::Relaxed) {
+                return;
+            }
+            let ratio = i as f64 / backoff_steps as f64;
+            for &ax in target_axes {
+                if ax == "x" {
+                    ctx.x_stepper.set_position(100.0 * ratio);
+                } else {
+                    ctx.z_stepper.set_position(100.0 * ratio);
+                }
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        thread::sleep(Duration::from_millis(40));
+    }
+
+    let seek_start_x = ctx.x_stepper.current_pos();
+    let seek_start_z = ctx.z_stepper.current_pos();
+
     let steps = 20;
     for i in 1..=steps {
         if ctx.homing_abort.load(Ordering::Relaxed) {
@@ -771,10 +793,10 @@ fn execute_simulation_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         let ease = 1.0 - (1.0 - ratio) * (1.0 - ratio);
         for &ax in target_axes {
             if ax == "x" {
-                let pos = start_x * (1.0 - ease);
+                let pos = seek_start_x * (1.0 - ease);
                 ctx.x_stepper.set_position(pos);
             } else {
-                let pos = start_z * (1.0 - ease);
+                let pos = seek_start_z * (1.0 - ease);
                 ctx.z_stepper.set_position(pos);
             }
         }

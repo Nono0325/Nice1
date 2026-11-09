@@ -1,12 +1,11 @@
 # 🤖 衝壓機自動化搬運與步進馬達控制系統 (Raspberry Pi Stepper Controller)
 
-> **工業級衝壓自動化系統** — 樹梅派 X/Z 軸步進馬達控制器 (QN-1805-E1 方形電感接近開關 + LSD-P25/20 圓形強力直流電磁鐵 + 手臂霍爾檢測) + 雙向 WebSocket 即時監控 + Three.js 3D 數位分身模擬 + G-code/巨集編輯器 + Web 系統終端機 + OTA 線上更新
+> **工業級衝壓自動化系統** — 樹梅派 X/Z 軸步進馬達控制器 (QN-1805-E1 方形電感接近開關 + 4組 LSD-P25/20 圓形強力直流電磁鐵 + 8顆末端霍爾金屬檢測) + 原生雙向 WebSocket 即時監控 + 積木式移動程式工作坊 + G-code 編輯器 + Web 系統終端機 + OTA 線上更新
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Nono0325%2FNice1-181717?logo=github)](https://github.com/Nono0325/Nice1)
 [![Rust](https://img.shields.io/badge/Rust-2021%20Edition-DE522D?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Axum](https://img.shields.io/badge/Axum-0.7%20Tokio-000000?logo=rust)](https://github.com/tokio-rs/axum)
 [![rppal](https://img.shields.io/badge/GPIO-rppal%200.19-C51A4A?logo=raspberry-pi)](https://docs.rs/rppal)
-[![Three.js](https://img.shields.io/badge/Three.js-r128-000000?logo=threedotjs)](https://threejs.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
@@ -60,7 +59,6 @@ cargo run --release
 | 🔬 **馬達診斷工具** | 即時偵測 GPIO 驅動模式 (Real / Simulation)、X/Z 軸連續巡迴測試、4 組 LSD-P25/20 電磁鐵吸盤動作與 QN-1805-E1 感測器觸發測試。 |
 | 🧩 **積木式移動程式工作坊 & 巨集** | 圖像化拖曳拼圖積木編程（工位快速定位 `GOTO`、絕對座標 `MOVE_MM`、相對寸動 `STEP`、4組電磁鐵全控/單組控制 `M1~M4`、8顆霍爾總檢/分組檢測 `G1~G4`、`REPEAT ... END` 迴圈），支援實機座標一鍵教導 (`📍 取當前值`)、單步測試、執行中積木即時高亮與雙向文字腳本同步。 |
 | 📁 **G-code 解析與 2D 模擬** | 支援 `.gcode` / `.nc` 拖曳上傳與 2D 軌跡繪製，內建線上 G-code 編輯器與直接執行功能。 |
-| 🕹️ **Three.js 3D 數位分身** | 3D 實時機械結構運動模擬（龍門導軌、Z軸立柱滑台、LSD-P25/20 圓形電磁鐵、金屬工件吸附），視角自由平移旋轉縮放。 |
 | 💻 **Web 系統終端機** | 具備權限驗證的 Web Console，支援 `sudo`、`cd` 目錄記憶、快捷監控指令與 Process 強制中斷。 |
 | 🔄 **GitHub OTA 線上一鍵更新** | 線上檢查 GitHub 最新 Commit SHA、差異對比、一鍵下載升級並自動重啟背景服務。 |
 
@@ -169,21 +167,27 @@ Nice/
 ├── README.md                   ← 專案總說明文件 (本檔)
 ├── 冲压16.pptx                  ← 衝壓系統機構設計與規格簡報
 └── servo_control/
+    ├── Cargo.toml              ← 🦀 Rust 專案與套件設定檔 (Axum + Tokio + rppal)
+    ├── src/
+    │   ├── main.rs             ← Rust 主程式、Tokio 執行緒與 WebSocket 廣播迴圈
+    │   ├── state.rs            ← 全域無鎖/RwLock 系統狀態結構與持久化
+    │   ├── gpio.rs             ← 雙軸步進馬達梯形加減速、硬體兩階段上限保護歸零與感測器濾波
+    │   ├── automation.rs       ← 14步衝壓自動搬運循環與積木巨集解譯器
+    │   └── api.rs              ← REST API、全站登入、終端機與原生 WebSocket 路由
     ├── install.sh              ← 🚀 樹梅派一鍵安裝與自啟配置腳本
-    ├── start.sh                ← 手動前台啟動腳本
-    ├── servo_controller.py     ← 後端主程式 (Flask + Socket.IO + 步進驅動引擎)
+    ├── start.sh                ← 手動前台啟動腳本 (優先啟動 Rust 高速二進位核心)
+    ├── servo_controller.py     ← Python 相容備援引擎 (Flask + Socket.IO)
     ├── requirements.txt        ← Python 相依套件清單
     ├── history_log.json        ← 系統歷史操作與診斷日誌
     ├── macros.json             ← 動作巨集指令設定檔
     ├── README.md               ← 控制模組詳細說明文件
     ├── templates/
-    │   └── index.html          ← 前端響應式介面 (9 大 Tab + 資安登入遮罩)
+    │   └── index.html          ← 前端響應式介面 (8 大 Tab + 資安登入遮罩)
     └── static/
         ├── css/
         │   └── style.css       ← 工業深色主題設計系統樣式
         └── js/
-            ├── app.js          ← 核心前端邏輯、WebSocket 通訊與事件處理
-            └── simulator3d.js  ← Three.js 3D 實時機械模擬渲染引擎
+            └── app.js          ← 核心前端邏輯、原生 WebSocket/HTTP 雙通道通訊與積木工作坊
 ```
 
 ---

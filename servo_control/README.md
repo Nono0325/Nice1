@@ -1,11 +1,10 @@
 # 🤖 樹梅派步進馬達控制系統 (Raspberry Pi Stepper Motor Controller)
 
-> **衝壓機自動化搬運系統** — Raspberry Pi X/Z 軸步進馬達控制器 (QN-1805-E1 電感接近開關 + LSD-P25/20 圓形強力電磁鐵 + 手臂霍爾金屬檢測) + 即時網頁監控 + 3D 數位分身模擬 + G-code/巨集編輯器 + 系統終端機
+> **衝壓機自動化搬運系統** — Raspberry Pi X/Z 軸步進馬達控制器 (QN-1805-E1 電感接近開關 + 4組 LSD-P25/20 圓形強力電磁鐵 + 8顆末端霍爾金屬檢測) + 原生 WebSocket 即時網頁監控 + 積木式移動程式工作坊 + G-code 編輯器 + 系統終端機
 
+[![Rust](https://img.shields.io/badge/Rust-2021%20Edition-DE522D?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Axum](https://img.shields.io/badge/Axum-0.7%20Tokio-000000?logo=rust)](https://github.com/tokio-rs/axum)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.x-lightgrey?logo=flask)](https://flask.palletsprojects.com)
-[![Socket.IO](https://img.shields.io/badge/Socket.IO-4.x-black?logo=socketdotio)](https://socket.io)
-[![Three.js](https://img.shields.io/badge/Three.js-r128-orange?logo=threedotjs)](https://threejs.org)
 [![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-GPIO-red?logo=raspberry-pi)](https://www.raspberrypi.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
@@ -44,9 +43,8 @@ cargo run --release
 
 - 🔐 **全站登入防護與安全驗證**：進入系統即啟用安全遮罩，支援密碼登入驗證、自動閒置超時鎖定與密碼變更。
 - 🎮 **工業級控制面板（HMI）**：START_PB / STOP_PB 金屬質感按鈕、9 顆狀態指示燈、X/Z 軸可拖曳位置條、累加 jog 微調移動與 14-Step 衝壓循環。
-- 🤖 **動作巨集管理器**：可自訂動作腳本指令（`MOVE`, `DELAY`, `MAGNET`, `CHECK METAL`, `WAIT PRESS`, `HOME`, `MSG`），支援執行、暫停與腳本儲存。
+- 🧩 **積木式移動程式工作坊 & 動作巨集**：圖像化拖曳拼圖積木編程（`GOTO`, `MOVE_MM`, `STEP`, `MAGNET 1~4`, `CHECK GROUP 1~4`, `WAIT PRESS`, `REPEAT ... END`），支援一鍵教導當前座標、單步測試與雙向腳本同步。
 - 📁 **G-code 解析與即時編輯器**：支援 `.gcode` / `.nc` 檔案上傳與即時 2D 路徑繪製，提供線上 G-code 編輯與快速指令插入。
-- 🕹️ **3D 實時機械模擬（Three.js）**：3D 數位分身動態聯動真實馬達位置（LSD-P25/20 圓形電磁鐵吸取金屬工件、Z 軸垂直升降）。
 - 💻 **Web 系統終端機**：受密碼保護的 Web Console，支援 `sudo`、`cd` 目錄切換、快捷常用系統監控指令與即時輸出。
 - 🔄 **GitHub 線上 OTA 自動更新**：一鍵檢查遠端最新 Commit 並透過 Git 同步更新，樹梅派環境下自動重啟服務。
 - 🎨 **介面字體與外觀自訂**：內建 Inter、Roboto、Outfit、JetBrains Mono、Fira Code 等字體與字型大小即時調節。
@@ -97,7 +95,7 @@ cargo run --release
 
 ---
 
-## 🎮 網頁介面功能（9 大 Tab）
+## 🎮 網頁介面功能（8 大 Tab）
 
 ### 1️⃣ 控制面板
 - **START_PB / STOP_PB** 工業金屬觸感按鈕
@@ -152,12 +150,7 @@ cargo run --release
 - G-code 線上文字編輯器與快速指令（G0, G1, G28, M106, M107）插入
 - 編輯器直接執行與進度反饋
 
-### 8️⃣ 3D 實體模擬 (Three.js)
-- 3D 實時機械結構運動模擬（龍門導軌、Z 軸立柱、圓形電磁鐵吸盤、工件金屬吸附）
-- 支援滑鼠左鍵旋轉、右鍵平移、滾輪縮放與視角重置
-- 與真實硬體馬達位置毫秒級同步
-
-### 9️⃣ 系統終端機 (Web Terminal)
+### 8️⃣ 系統終端機 (Web Terminal)
 - 🔒 密碼保護解鎖機制
 - 完整支援 Linux Bash 指令執行與 `sudo` 權限提升
 - 智慧 `cd` 目錄切換與狀態維持
@@ -209,21 +202,22 @@ sudo systemctl restart servo-control
 ```
 Nice/
 ├── servo_control/
+│   ├── Cargo.toml              ← 🦀 Rust 專案設定檔 (Axum + Tokio + rppal)
+│   ├── src/                    ← 🦀 Rust 核心原始碼 (main/state/gpio/automation/api)
 │   ├── install.sh              ← 🚀 一鍵安裝腳本（含 systemd 開機自啟）
 │   ├── start.sh                ← 手動啟動腳本
-│   ├── servo_controller.py     ← 後端主程式（Flask + Socket.IO + 步進驅動）
+│   ├── servo_controller.py     ← Python 相容備援主程式
 │   ├── requirements.txt        ← Python 依賴清單
 │   ├── history_log.json        ← 系統操作歷史記錄
 │   ├── macros.json             ← 動作巨集儲存檔
 │   ├── README.md               ← 完整使用說明文件
 │   ├── templates/
-│   │   └── index.html          ← 網頁前端介面（9 大 Tab + 登入遮罩）
+│   │   └── index.html          ← 網頁前端介面（8 大 Tab + 登入遮罩）
 │   └── static/
 │       ├── css/
 │       │   └── style.css       ← 工業深色主題樣式與設計系統
 │       └── js/
-│           ├── app.js          ← 核心前端邏輯與 WebSocket 通訊
-│           └── simulator3d.js  ← Three.js 3D 數位分身渲染引擎
+│           └── app.js          ← 核心前端邏輯、WebSocket 通訊與積木工作坊
 └── 冲压16.pptx                  ← 衝壓系統設計參考規格簡報
 ```
 

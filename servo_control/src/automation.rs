@@ -13,12 +13,38 @@ fn wait_motor_reach(
     target: f64,
     tolerance: f64,
     timeout_sec: f64,
+    require_metal: bool,
 ) -> bool {
     let start = Instant::now();
     loop {
+        if require_metal {
+            ctx.read_limit_switches();
+        }
         {
             let s = ctx.state.read().unwrap();
             if !s.pickup_active || !s.system_run {
+                return false;
+            }
+            if require_metal && !s.hall_arm_metal {
+                drop(s);
+                ctx.x_stepper.halt();
+                ctx.z_stepper.halt();
+                ctx.set_digital_output("magnet", false);
+                let msg = "搬運途中檢測到金屬工件脫落 (霍爾感測訊號中斷)，緊急煞車停機！";
+                {
+                    let mut sw = ctx.state.write().unwrap();
+                    sw.error = true;
+                    sw.error_msg = msg.to_string();
+                    sw.pickup_active = false;
+                }
+                ctx.add_error_log(
+                    "CRITICAL",
+                    Some("HALL"),
+                    Some("ERR_HALL_IN_FLIGHT_DROP"),
+                    msg,
+                    Some(format!("當前座標={:.0}µs, 目標座標={:.0}µs", motor.current_pos(), target)),
+                );
+                ctx.add_history(format!("❌ 緊急警報：{}", msg), "error");
                 return false;
             }
         }
@@ -27,22 +53,21 @@ fn wait_motor_reach(
             return true;
         }
         if start.elapsed().as_secs_f64() > timeout_sec {
-            ctx.add_history(
-                format!(
-                    "到位警告：馬達到位超時（目標={:.0}µs，當前={:.0}µs）",
-                    target, cur
-                ),
-                "warn",
+            let msg = format!(
+                "到位警告：馬達到位超時（目標={:.0}µs，當前={:.0}µs）",
+                target, cur
             );
+            ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_MOTOR_REACH_TIMEOUT"), &msg, None);
+            ctx.add_history(msg, "warn");
             return false;
         }
-        thread::sleep(Duration::from_millis(40));
+        thread::sleep(Duration::from_millis(30));
     }
 }
 
 pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
     thread::spawn(move || {
-        {
+        let need_home = {
             let mut s = ctx.state.write().unwrap();
             s.pickup_active = true;
             let mode_str = if s.continuous_mode {
@@ -51,6 +76,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
                 "單次循環模式"
             };
             let target = s.cycle_target;
+            let unhomed = !s.x_homed || !s.z_homed;
             drop(s);
             ctx.add_history(
                 format!(
@@ -59,6 +85,12 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
                 ),
                 "success",
             );
+            unhomed
+        };
+
+        if need_home {
+            ctx.add_history("⚠️ 啟動前原點安全互鎖：雙軸尚未校準原點，自動執行雙軸安全歸零...", "info");
+            home_axis(Arc::clone(&ctx), "all");
         }
 
         loop {
@@ -92,7 +124,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 1/14: X 軸前往 a 點 (歸零點)...", "info");
             ctx.set_servo_pulse("x", pos_x_a);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 15.0, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_x_a {
@@ -110,7 +142,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 2/14: Z 軸下降至 e 點 (向下極限取料面)...", "info");
             ctx.set_servo_pulse("z", pos_z_e);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 15.0, 12.0, false) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -137,7 +169,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 4/14: Z 軸上升至 d 點 (安全高度)...", "info");
             ctx.set_servo_pulse("z", pos_z_d);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_z_d {
@@ -163,6 +195,14 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
                 (s.hall_arm_metal, s.hall_active_count, s.hall_group_count)
             };
             if !has_metal {
+                let err_msg = "末端霍爾感測陣列 (8顆/4組) 未檢測到金屬工件，自動循環中止";
+                ctx.add_error_log(
+                    "ERROR",
+                    Some("HALL"),
+                    Some("ERR_HALL_PICKUP_MISS"),
+                    err_msg,
+                    None,
+                );
                 ctx.add_history(
                     "❌ 警報：末端 8 顆霍爾感測器 (G1~G4) 皆未檢測到金屬工件！取料失敗，緊急中斷！",
                     "error",
@@ -171,8 +211,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
                 {
                     let mut s = ctx.state.write().unwrap();
                     s.error = true;
-                    s.error_msg =
-                        "末端霍爾感測陣列 (8顆/4組) 未檢測到金屬工件，自動循環中止".to_string();
+                    s.error_msg = err_msg.to_string();
                     s.pickup_active = false;
                 }
                 ctx.emit_ws("pickup_step", json!({ "step": "idle" }));
@@ -187,7 +226,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             thread::sleep(Duration::from_millis(200));
 
-            // 步驟 6: X 軸到 c 點
+            // 步驟 6: X 軸到 c 點（搬運途中即時監控霍爾訊號防脫落）
             if !ctx.state.read().unwrap().system_run {
                 break;
             }
@@ -195,14 +234,14 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
                 "pickup_step",
                 json!({ "step": "move-mold2", "desc": "6. X軸前往c點" }),
             );
-            ctx.add_history("步驟 6/14: X 軸移動至 c 點 (向右極限放料點)...", "info");
+            ctx.add_history("步驟 6/14: X 軸移動至 c 點 (向右極限放料點，全程監控防掉件)...", "info");
             ctx.set_servo_pulse("x", pos_x_c);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_c, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_c, 15.0, 12.0, true) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
 
-            // 步驟 7: Z 軸下去 (到達 e 點)
+            // 步驟 7: Z 軸下去 (到達 e 點，搬運途中即時監控霍爾訊號防脫落)
             if !ctx.state.read().unwrap().system_run {
                 break;
             }
@@ -212,7 +251,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 7/14: Z 軸下降至 e 點 (放料深度)...", "info");
             ctx.set_servo_pulse("z", pos_z_e);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 15.0, 12.0, true) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -239,7 +278,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 9/14: Z 軸上升至 d 點 (安全高度)...", "info");
             ctx.set_servo_pulse("z", pos_z_d);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_z_d {
@@ -257,7 +296,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 10/14: X 軸移動至 b 點 (中間電感接近開關工位)...", "info");
             ctx.set_servo_pulse("x", pos_x_b);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_b, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_b, 15.0, 12.0, false) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -272,7 +311,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 11/14: Z 軸下降至 50% 中間避讓高度...", "info");
             ctx.set_servo_pulse("z", pos_z_half);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_half, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_half, 15.0, 12.0, false) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -318,7 +357,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 13/14: Z 軸上升至 d 點 (安全高度)...", "info");
             ctx.set_servo_pulse("z", pos_z_d);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_z_d {
@@ -336,7 +375,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 14/14: X 軸回到 a 點 (原點)...", "info");
             ctx.set_servo_pulse("x", pos_x_a);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 15.0, 12.0) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 15.0, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_x_a {
@@ -775,8 +814,70 @@ pub fn spawn_macro_runner(ctx: Arc<AppContext>, commands: Vec<String>) {
                     ctx.add_history(format!("巨集提示: {}", msg), "success");
                     ctx.emit_ws("macro_msg", json!({ "msg": msg }));
                 }
+                "G0" | "G00" | "G1" | "G01" => {
+                    let mut target_x: Option<f64> = None;
+                    let mut target_z: Option<f64> = None;
+                    for token in &parts[1..] {
+                        let t_up = token.to_uppercase();
+                        if let Some(val_str) = t_up.strip_prefix('X') {
+                            if let Ok(v) = val_str.parse::<f64>() {
+                                target_x = Some(v);
+                            }
+                        } else if let Some(val_str) = t_up.strip_prefix('Y').or_else(|| t_up.strip_prefix('Z')) {
+                            if let Ok(v) = val_str.parse::<f64>() {
+                                target_z = Some(v);
+                            }
+                        }
+                    }
+                    let (x_min, x_scale, z_min, z_scale) = {
+                        let s = ctx.state.read().unwrap();
+                        (s.x_min as f64, s.x_scale, s.z_min as f64, s.z_scale)
+                    };
+                    if let Some(xv) = target_x {
+                        let pulse_x = if xv <= 400.0 { x_min + xv * x_scale } else { xv };
+                        ctx.set_servo_pulse("x", pulse_x);
+                        wait_macro_motor_target(&ctx, "x", pulse_x);
+                    }
+                    if let Some(zv) = target_z {
+                        let pulse_z = if zv <= 400.0 { z_min + zv * z_scale } else { zv };
+                        ctx.set_servo_pulse("z", pulse_z);
+                        wait_macro_motor_target(&ctx, "z", pulse_z);
+                    }
+                }
+                "G28" => {
+                    ctx.add_history("G-Code G28: 執行雙軸安全歸零", "info");
+                    home_axis(Arc::clone(&ctx), "all");
+                }
+                "G4" | "G04" => {
+                    let mut ms = 500.0;
+                    for token in &parts[1..] {
+                        let t_up = token.to_uppercase();
+                        if let Some(p_str) = t_up.strip_prefix('P') {
+                            if let Ok(v) = p_str.parse::<f64>() {
+                                ms = v;
+                            }
+                        } else if let Some(s_str) = t_up.strip_prefix('S') {
+                            if let Ok(v) = s_str.parse::<f64>() {
+                                ms = v * 1000.0;
+                            }
+                        }
+                    }
+                    thread::sleep(Duration::from_millis(ms.max(0.0) as u64));
+                }
+                "M3" | "M4" | "M106" => {
+                    ctx.set_digital_output("magnet", true);
+                    ctx.add_history("G-Code: 電磁鐵通電吸附 ON", "info");
+                    thread::sleep(Duration::from_millis(300));
+                }
+                "M5" | "M107" => {
+                    ctx.set_digital_output("magnet", false);
+                    ctx.add_history("G-Code: 電磁鐵斷電釋放 OFF", "info");
+                    thread::sleep(Duration::from_millis(300));
+                }
                 _ => {
-                    ctx.add_history(format!("巨集錯誤: 未知指令 '{}'", op), "error");
+                    if !op.starts_with(';') && !op.starts_with('(') {
+                        ctx.add_history(format!("巨集錯誤: 未知指令 '{}'", op), "error");
+                    }
                 }
             }
         }

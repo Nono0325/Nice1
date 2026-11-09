@@ -87,6 +87,18 @@ fn spawn_broadcast_loop(ctx: Arc<AppContext>) {
                     / 10.0)
                     .clamp(s.z_min_mm, s.z_max_mm);
 
+                // 若原點霍爾/限位處於觸發狀態或已完成歸零，強制定錨於 0 原點坐標
+                if (s.lim_x_a || s.lim_left) && x_clamped <= x_min_f + 15.0 {
+                    s.x_pulse = 0;
+                    s.x_mm = 0.0;
+                    s.x_pct = 0.0;
+                }
+                if (s.lim_z_d || s.lim_up) && z_clamped <= z_min_f + 15.0 {
+                    s.z_pulse = 0;
+                    s.z_mm = 0.0;
+                    s.z_pct = 0.0;
+                }
+
                 s.y1_pulse = s.z_pulse;
                 s.y2_pulse = s.z_pulse;
                 s.y_pct = s.z_pct;
@@ -141,12 +153,36 @@ fn spawn_broadcast_loop(ctx: Arc<AppContext>) {
             ctx.emit_ws("state_update", payload);
 
             tick = tick.wrapping_add(1);
-            if tick % 1800 == 0 && ctx.history_dirty.load(Ordering::Relaxed) {
-                ctx.save_history_to_disk();
+            if tick % 1800 == 0 {
+                if ctx.history_dirty.load(Ordering::Relaxed) {
+                    ctx.save_history_to_disk();
+                }
+                if ctx.error_dirty.load(Ordering::Relaxed) {
+                    ctx.save_errors_to_disk();
+                }
             }
 
             tokio::time::sleep(Duration::from_millis(160)).await;
         }
+    });
+}
+
+fn spawn_hardware_watchdog(ctx: Arc<AppContext>) {
+    std::thread::spawn(move || {
+        #[cfg(target_os = "linux")]
+        {
+            use std::io::Write;
+            if let Ok(mut wd) = std::fs::OpenOptions::new().write(true).open("/dev/watchdog") {
+                ctx.state.write().unwrap().watchdog_active = true;
+                println!("[WATCHDOG] Raspberry Pi BCM2835 Hardware Watchdog activated (/dev/watchdog)");
+                loop {
+                    let _ = wd.write_all(b"1");
+                    let _ = wd.flush();
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+            }
+        }
+        let _ = ctx;
     });
 }
 
@@ -162,6 +198,7 @@ async fn main() {
     println!("  資源目錄: {}", base_dir.display());
     println!("============================================================");
 
+    spawn_hardware_watchdog(Arc::clone(&ctx));
     spawn_broadcast_loop(Arc::clone(&ctx));
 
     let static_dir = base_dir.join("static");

@@ -129,7 +129,7 @@ let state = {
   hall_active_count: 0, hall_group_count: 0,
   hall_arm_metal: false, press_done: false,
   lim_left: false, lim_mid: false, lim_right: false, lim_up: false, lim_down: false, hall_metal: false,
-  x_min: 500, x_max: 2500, z_min: 500, z_max: 2500, y_min: 500, y_max: 2500,
+  x_min: 0, x_max: 2500, z_min: 0, z_max: 2500, y_min: 0, y_max: 2500,
   x_min_mm: 0.0, x_max_mm: 200.0, z_min_mm: 0.0, z_max_mm: 200.0, y_min_mm: 0.0, y_max_mm: 200.0,
   y_sync: true, z_sync: true,
   x_scale: 10.0, z_scale: 10.0, y_scale: 10.0,
@@ -484,7 +484,7 @@ function updateUI() {
   // 真實物理座標 (mm)
   const xScale = s.x_scale || 10.0;
   const zScale = s.z_scale || s.y_scale || 10.0;
-  const xMm = s.x_mm !== undefined ? s.x_mm : ((s.x_pulse - 500) / xScale);
+  const xMm = s.x_mm !== undefined ? s.x_mm : ((s.x_pulse - (s.x_min || 0)) / xScale);
   setEl('xMmDisplay', el => el.textContent = `${xMm.toFixed(1)} mm`);
   setEl('xMmCurVal', el => el.textContent = `${xMm.toFixed(1)} mm`);
 
@@ -497,7 +497,7 @@ function updateUI() {
   setEl('y1PulseDisplay', el => el.textContent = `${zPulse} µs`);
   setEl('y2PulseDisplay', el => el.textContent = `${zPulse} µs`);
   setEl('yPulseVal', el => el.textContent = `${zPulse} µs`);
-  const zMm = s.z_mm !== undefined ? s.z_mm : ((zPulse - 500) / zScale);
+  const zMm = s.z_mm !== undefined ? s.z_mm : ((zPulse - (s.z_min !== undefined ? s.z_min : (s.y_min || 0))) / zScale);
   setEl('yMmDisplay', el => el.textContent = `${zMm.toFixed(1)} mm`);
   setEl('yMmCurVal', el => el.textContent = `${zMm.toFixed(1)} mm`);
   setEl('blockLiveCoordText', el => el.textContent = `X: ${xMm.toFixed(1)}mm / Z: ${zMm.toFixed(1)}mm`);
@@ -621,9 +621,9 @@ function updateUI() {
   // 範圍設定顯示 (同時顯示 µs 與 mm)
   const zMinUs = s.z_min !== undefined ? s.z_min : s.y_min;
   const zMaxUs = s.z_max !== undefined ? s.z_max : s.y_max;
-  const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : Math.max(0, (s.x_min - 500) / Math.max(0.001, xScale));
+  const xMinMm = s.x_min_mm !== undefined ? s.x_min_mm : 0.0;
   const xMaxMm = s.x_max_mm !== undefined ? s.x_max_mm : (xMinMm + (s.x_max - s.x_min) / Math.max(0.001, xScale));
-  const yMinMm = s.z_min_mm !== undefined ? s.z_min_mm : (s.y_min_mm !== undefined ? s.y_min_mm : Math.max(0, (zMinUs - 500) / Math.max(0.001, zScale)));
+  const yMinMm = s.z_min_mm !== undefined ? s.z_min_mm : (s.y_min_mm !== undefined ? s.y_min_mm : 0.0);
   const yMaxMm = s.z_max_mm !== undefined ? s.z_max_mm : (s.y_max_mm !== undefined ? s.y_max_mm : (yMinMm + (zMaxUs - zMinUs) / Math.max(0.001, zScale)));
 
   const curXRangeUs = s.x_max - s.x_min;
@@ -820,6 +820,17 @@ async function cmdPickup() {
 // ── 馬達移動 (支援 100+100 累加、mm 單位與 WebSocket/HTTP 雙通道不斷線控制) ──
 async function moveAxis(axis, dir) {
   if (!state.system_run) { toast('系統未啟動，請先按下 START', 'error'); return; }
+  
+  // 前端防撞第一道防線：若原點/霍爾感測器觸發，禁止繼續向後移動
+  if (axis === 'x' && dir < 0 && (state.lim_x_a || state.lim_left)) {
+    toast('X 軸原點霍爾/接近開關觸發中，禁止繼續向後移動！', 'warn');
+    return;
+  }
+  if (axis === 'z' && dir < 0 && (state.lim_z_d || state.lim_up || state.lim_z_e || state.lim_down)) {
+    toast('Z 軸原點霍爾/限位開關觸發中，禁止繼續向後移動！', 'warn');
+    return;
+  }
+
   const deltaMm = dir * stepSizeMm;
   try {
     const r = await apiPost('/api/move', { axis, delta_mm: deltaMm });
@@ -944,23 +955,25 @@ async function applyXLimits() {
   const xMinVal = parseFloat(document.getElementById('xMinInput').value);
   const xMaxVal = parseFloat(document.getElementById('xMaxInput').value);
   const unitMode = document.getElementById('xLimitUnitSelect')?.value || 'auto';
-  if (isNaN(xMinVal) || isNaN(xMaxVal) || xMinVal >= xMaxVal) {
-    toast('X 軸最小值必須小於最大值', 'error');
+  if (isNaN(xMinVal) || isNaN(xMaxVal) || xMinVal < 0 || xMinVal >= xMaxVal) {
+    toast('X 軸最小值必須大於等於 0 且小於最大值', 'error');
     return;
   }
-  let payload = {};
-  const isMm = unitMode === 'mm' || (unitMode === 'auto' && (xMinVal < 500 || xMaxVal <= 400));
-  if (isMm) {
-    payload = { x_min_mm: xMinVal, x_max_mm: xMaxVal };
-  } else {
-    payload = { x_min: xMinVal, x_max: xMaxVal };
-  }
+  const isMm = (unitMode === 'mm');
+  const payload = isMm
+    ? { x_min_mm: xMinVal, x_max_mm: xMaxVal }
+    : { x_min: xMinVal, x_max: xMaxVal };
+
   const r = await apiPost('/api/set_limits', payload);
   if (r.ok) {
     if (r.limits) {
       state = { ...state, ...r.limits };
     }
     clearSettingsDirty();
+    const minEl = document.getElementById('xMinInput');
+    const maxEl = document.getElementById('xMaxInput');
+    if (minEl) minEl.value = isMm ? state.x_min_mm : state.x_min;
+    if (maxEl) maxEl.value = isMm ? state.x_max_mm : state.x_max;
     updateUI();
     toast(`✅ X 軸行程已更新：${state.x_min} ~ ${state.x_max} µs (${state.x_min_mm} ~ ${state.x_max_mm} mm)`, 'success');
     addLog(`X軸極限更新: ${state.x_min}~${state.x_max}µs (${state.x_min_mm}~${state.x_max_mm}mm)`, 'success');
@@ -974,23 +987,25 @@ async function applyYLimits() {
   const yMaxVal = parseFloat(document.getElementById('yMaxInput').value);
   const unitMode = document.getElementById('yLimitUnitSelect')?.value || 'auto';
   const sync = document.getElementById('ySyncSetting')?.checked ?? true;
-  if (isNaN(yMinVal) || isNaN(yMaxVal) || yMinVal >= yMaxVal) {
-    toast('Z/Y 軸最小值必須小於最大值', 'error');
+  if (isNaN(yMinVal) || isNaN(yMaxVal) || yMinVal < 0 || yMinVal >= yMaxVal) {
+    toast('Z/Y 軸最小值必須大於等於 0 且小於最大值', 'error');
     return;
   }
-  let payload = {};
-  const isMm = unitMode === 'mm' || (unitMode === 'auto' && (yMinVal < 500 || yMaxVal <= 400));
-  if (isMm) {
-    payload = { y_min_mm: yMinVal, y_max_mm: yMaxVal, y_sync: sync };
-  } else {
-    payload = { y_min: yMinVal, y_max: yMaxVal, y_sync: sync };
-  }
+  const isMm = (unitMode === 'mm');
+  const payload = isMm
+    ? { z_min_mm: yMinVal, z_max_mm: yMaxVal, y_min_mm: yMinVal, y_max_mm: yMaxVal, y_sync: sync }
+    : { z_min: yMinVal, z_max: yMaxVal, y_min: yMinVal, y_max: yMaxVal, y_sync: sync };
+
   const r = await apiPost('/api/set_limits', payload);
   if (r.ok) {
     if (r.limits) {
       state = { ...state, ...r.limits };
     }
     clearSettingsDirty();
+    const minEl = document.getElementById('yMinInput');
+    const maxEl = document.getElementById('yMaxInput');
+    if (minEl) minEl.value = isMm ? state.z_min_mm : state.z_min;
+    if (maxEl) maxEl.value = isMm ? state.z_max_mm : state.z_max;
     updateUI();
     toast(`✅ Z/Y 軸行程已更新：${state.z_min} ~ ${state.z_max} µs (${state.z_min_mm} ~ ${state.z_max_mm} mm)`, 'success');
     addLog(`Z/Y軸極限更新: ${state.z_min}~${state.z_max}µs (${state.z_min_mm}~${state.z_max_mm}mm)`, 'success');
@@ -1123,10 +1138,17 @@ function toast(msg, type = 'info') {
 // ── API 工具 ─────────────────────────────────────────────────
 async function apiPost(url, body = {}) {
   try {
+    const payload = (siteToken && body && typeof body === 'object' && !body.token)
+      ? { ...body, token: siteToken }
+      : body;
+    const headers = { 'Content-Type': 'application/json' };
+    if (siteToken) {
+      headers['Authorization'] = `Bearer ${siteToken}`;
+    }
     const r = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      headers,
+      body: JSON.stringify(payload)
     });
     return await r.json();
   } catch (e) {
@@ -1152,17 +1174,22 @@ async function applyAdvancedLimits() {
   const yMaxSpeed   = parseFloat(document.getElementById('yMaxSpeedInput').value);
   const yAccelSteps = parseFloat(document.getElementById('yAccelStepsInput').value);
   const yScale      = parseFloat(document.getElementById('yScaleInput').value);
-  const homingSpeed = parseFloat(document.getElementById('homingSpeedInput')?.value || 400);
+  const homingSpeed = parseFloat(document.getElementById('homingSpeedInput')?.value || 2500);
 
   const r = await apiPost('/api/set_limits', {
     x_max_speed: xMaxSpeed, x_accel_steps: xAccelSteps, x_scale: xScale,
+    z_max_speed: yMaxSpeed, z_accel_steps: yAccelSteps, z_scale: yScale,
     y_max_speed: yMaxSpeed, y_accel_steps: yAccelSteps, y_scale: yScale,
     homing_speed_hz: homingSpeed
   });
   if (r.ok) {
-    toast(`✅ 速度、加減速與物理比例已成功儲存！(X比例: 1mm=${xScale}µs, Y比例: 1mm=${yScale}µs)`, 'success');
-    addLog(`參數儲存: X比例=${xScale}µs/mm, Y比例=${yScale}µs/mm`, 'success');
+    if (r.limits) {
+      state = { ...state, ...r.limits };
+    }
     clearSettingsDirty();
+    updateUI();
+    toast(`✅ 速度(${xMaxSpeed}/${yMaxSpeed}Hz)、歸零(${homingSpeed}Hz)與物理比例已儲存！`, 'success');
+    addLog(`參數儲存: X速度=${xMaxSpeed}Hz, Z速度=${yMaxSpeed}Hz, 歸零=${homingSpeed}Hz, X比例=${xScale}, Z比例=${yScale}`, 'success');
   }
 }
 
@@ -2224,6 +2251,22 @@ socket.on('macro_status', (data) => {
     }
   }
   if (stopBtn) stopBtn.disabled = !data.running;
+
+  // 同步更新 G-code 執行進度
+  if (gcodeRunning) {
+    const progEl = document.getElementById('gcodeProgress');
+    if (progEl && data.current_line !== undefined) {
+      progEl.textContent = `${data.current_line} / ${gcodeLines.length}`;
+    }
+    if (!data.running) {
+      gcodeRunning = false;
+      const gRunBtn = document.getElementById('btnRunGcode');
+      const gStopBtn = document.getElementById('btnStopGcode');
+      if (gRunBtn) gRunBtn.disabled = false;
+      if (gStopBtn) gStopBtn.disabled = true;
+      toast("G-code 執行完成！", "success");
+    }
+  }
 });
 
 socket.on('macro_msg', (data) => {
@@ -2323,97 +2366,32 @@ async function runGcode() {
     toast('請先按下 START 啟動系統！', 'error');
     return;
   }
-  
+
   gcodeRunning = true;
   document.getElementById('btnRunGcode').disabled = true;
   document.getElementById('btnStopGcode').disabled = false;
-  
-  addLog("G-code 執行開始", "success");
-  
-  let lastX = 0, lastY = 0;
-  
-  for (gcodeIndex = 0; gcodeIndex < gcodeLines.length; gcodeIndex++) {
-    if (!gcodeRunning) break;
-    
-    document.getElementById('gcodeProgress').textContent = `${gcodeIndex + 1} / ${gcodeLines.length}`;
-    
-    let line = gcodeLines[gcodeIndex].split(';')[0].split('(')[0].trim();
-    if (!line) continue;
-    
-    const parts = line.split(/\s+/);
-    const cmd = parts[0].toUpperCase();
-    
-    if (cmd === 'G0' || cmd === 'G1') {
-      let targetX = lastX;
-      let targetY = lastY;
-      let hasMove = false;
-      
-      parts.forEach(part => {
-        if (part.startsWith('X') || part.startsWith('x')) {
-          targetX = parseFloat(part.substring(1));
-          hasMove = true;
-        } else if (part.startsWith('Y') || part.startsWith('y')) {
-          targetY = parseFloat(part.substring(1));
-          hasMove = true;
-        }
-      });
-      
-      if (hasMove) {
-        const xScale = state.x_scale || 10.0;
-        const yScale = state.y_scale || 10.0;
-        const pulseX = 500 + targetX * xScale;
-        const pulseY = 500 + targetY * yScale;
-        
-        await apiPost('/api/set_position', { axis: 'x', pct: (pulseX - state.x_min) / (state.x_max - state.x_min) * 100 });
-        await apiPost('/api/set_position', { axis: 'y', pct: (pulseY - state.y_min) / (state.y_max - state.y_min) * 100 });
-        
-        let waitLoops = 0;
-        while (gcodeRunning && state.system_run) {
-          const diffX = Math.abs(state.x_pulse - pulseX);
-          const diffY = Math.abs(state.y1_pulse - pulseY);
-          if (diffX < 10 && diffY < 10) {
-            break;
-          }
-          waitLoops++;
-          if (waitLoops > 150) { // 15 秒超時保護
-            addLog("G-code 警告: 移動到位等待超時", "warn");
-            break;
-          }
-          await sleep(100);
-        }
-        
-        lastX = targetX;
-        lastY = targetY;
-      }
-    } else if (cmd === 'G28') {
-      await apiPost('/api/home', { axis: 'all' });
-      // 先等待 200ms 確保後端 state.is_homing 已同步
-      await sleep(200);
-      // 輪詢等待歸零完成，最多等 30 秒
-      for (let i = 0; i < 300 && gcodeRunning; i++) {
-        if (!state.is_homing) break;
-        await sleep(100);
-      }
-      lastX = 0;
-      lastY = 0;
-    } else if (cmd === 'M106') {
-      await apiPost('/api/vacuum', { on: true });
-      await sleep(500);
-    } else if (cmd === 'M107') {
-      await apiPost('/api/vacuum', { on: false });
-      await sleep(500);
-    }
+  addLog("G-code 交由後端執行緒啟動執行", "success");
+
+  const r = await apiPost('/api/macro/run', {
+    action: 'start',
+    name: 'GCODE_DIRECT',
+    commands: gcodeLines
+  });
+
+  if (!r.ok) {
+    gcodeRunning = false;
+    document.getElementById('btnRunGcode').disabled = false;
+    document.getElementById('btnStopGcode').disabled = true;
+    toast(r.msg || 'G-code 啟動失敗', 'error');
+    return;
   }
-  
-  gcodeRunning = false;
-  document.getElementById('btnRunGcode').disabled = false;
-  document.getElementById('btnStopGcode').disabled = true;
-  addLog("G-code 執行結束", "success");
-  toast("G-code 執行完成！", "success");
+
+  toast('🚀 G-code 已交由後端高速執行緒運轉中！', 'success');
 }
 
-function stopGcode() {
+async function stopGcode() {
   gcodeRunning = false;
+  await apiPost('/api/macro/run', { action: 'stop' });
   document.getElementById('btnRunGcode').disabled = false;
   document.getElementById('btnStopGcode').disabled = true;
   addLog("G-code 執行已被使用者終止", "warn");
@@ -2912,9 +2890,19 @@ function updateClock() {
   if (el) el.textContent = new Date().toLocaleTimeString('zh-TW', { hour12: false });
 }
 
-// ── 鍵盤快捷鍵 ───────────────────────────────────────────────
+// ── 鍵盤快捷鍵 (含全站 Esc / Space 緊急停止 E-STOP) ──────────────────
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    cmdStop();
+    return;
+  }
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+  if (e.key === ' ') {
+    e.preventDefault();
+    cmdStop();
+    return;
+  }
   if (!state.system_run) return;
   switch (e.key) {
     case 'ArrowLeft':  e.preventDefault(); moveAxis('x', -1); break;
@@ -2926,6 +2914,16 @@ document.addEventListener('keydown', (e) => {
     case 'z': case 'Z': toggleZDown(); break;
     case 'h': case 'H': cmdHome('all'); break;
   }
+});
+
+socket.on('update_progress', (data) => {
+  if (!data) return;
+  const progBar  = document.getElementById('updateModalProgressBar');
+  const pctText  = document.getElementById('updateModalPctText');
+  const statText = document.getElementById('updateModalStatusText');
+  if (progBar && data.pct) progBar.style.width = `${data.pct}%`;
+  if (pctText && data.pct) pctText.textContent = `${data.pct}%`;
+  if (statText && data.msg) statText.textContent = data.msg;
 });
 
 async function checkTerminalAuthOnLoad() {

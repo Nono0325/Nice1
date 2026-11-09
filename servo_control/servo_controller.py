@@ -211,13 +211,13 @@ state = {
     'y_scale': 10.0,
 
     # 速度與加減速規劃
-    'x_max_speed': 2000.0,
-    'x_accel_steps': 100.0,
-    'z_max_speed': 2000.0,
-    'z_accel_steps': 100.0,
-    'y_max_speed': 2000.0,
-    'y_accel_steps': 100.0,
-    'homing_speed_hz': 400.0,  # 緩慢穩定歸零頻率
+    'x_max_speed': 8000.0,
+    'x_accel_steps': 50.0,
+    'z_max_speed': 8000.0,
+    'z_accel_steps': 50.0,
+    'y_max_speed': 8000.0,
+    'y_accel_steps': 50.0,
+    'homing_speed_hz': 2500.0,  # 閉迴路步進馬達穩定歸零頻率
 
     # 致能狀態
     'motor_locked': True,
@@ -228,6 +228,8 @@ state = {
 
     # 歸零執行狀態
     'is_homing': False,
+    'x_homed': False,
+    'z_homed': False,
 
     # ── 工業級連續運轉與壽命安全機制 (24/7/365 Continuous Mode) ──
     'continuous_mode':    False,   # 連續生產運轉模式
@@ -272,10 +274,10 @@ class StepperMotor:
         self.lock = threading.Lock()
         
         # 速度規劃參數
-        self.max_speed_hz = 2000.0
-        self.min_speed_hz = 200.0
-        self.accel_steps = 100.0
-        self.current_speed_hz = 200.0
+        self.max_speed_hz = 8000.0
+        self.min_speed_hz = 600.0
+        self.accel_steps = 50.0
+        self.current_speed_hz = 600.0
         
         self.enabled = True
         self.running = True
@@ -343,54 +345,103 @@ class StepperMotor:
                 
                 self.current_speed_hz = max(self.min_speed_hz, min(self.max_speed_hz, speed))
                 
-                # 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 安全防護（立即強制煞車，避免持續衝撞）
-                if diff < 0 and self.name == 'x' and (state.get('lim_x_a') or state.get('lim_left')):
-                    self.halt()
-                    time.sleep(0.01)
-                    continue
-                if diff > 0 and self.name == 'x' and (state.get('lim_x_c') or state.get('lim_right')):
-                    self.halt()
-                    time.sleep(0.01)
-                    continue
-                # Z 軸垂直升降：diff > 0 向上靠近 d 點 (向上歸零)，diff < 0 向下靠近 e 點 (向下極限)
-                if diff < 0 and self.name in ('z', 'y') and (state.get('lim_z_e') or state.get('lim_down')):
-                    self.halt()
-                    time.sleep(0.01)
-                    continue
-                if diff > 0 and self.name in ('z', 'y') and (state.get('lim_z_d') or state.get('lim_up')):
-                    self.halt()
-                    time.sleep(0.01)
-                    continue
+                # 即時感測器硬體防撞與原點觸發歸零保護（每次步進前直接硬體讀取）
+                if IS_RASPBERRY_PI:
+                    if self.name == 'x':
+                        lim_a_hit = not GPIO.input(PIN['LIM_X_A']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+                        if diff < 0 and lim_a_hit:
+                            self.halt()
+                            self.current_pos = 0.0
+                            state['lim_x_a'] = True
+                            state['lim_left'] = True
+                            state['x_pulse'] = 0
+                            state['x_mm'] = 0.0
+                            state['x_pct'] = 0.0
+                            state['x_homed'] = True
+                            time.sleep(0.01)
+                            continue
+                        if diff > 0 and not GPIO.input(PIN['LIM_X_C']):
+                            self.halt()
+                            state['lim_x_c'] = True
+                            state['lim_right'] = True
+                            time.sleep(0.01)
+                            continue
+                    else: # z or y
+                        lim_origin_hit = not GPIO.input(PIN['LIM_Z_D']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+                        if diff < 0 and lim_origin_hit:
+                            self.halt()
+                            self.current_pos = 0.0
+                            state['lim_z_d'] = True
+                            state['lim_up'] = True
+                            state['z_pulse'] = 0
+                            state['z_mm'] = 0.0
+                            state['z_pct'] = 0.0
+                            state['z_homed'] = True
+                            time.sleep(0.01)
+                            continue
+                        if diff > 0 and not GPIO.input(PIN['LIM_Z_E']):
+                            self.halt()
+                            state['lim_z_e'] = True
+                            state['lim_down'] = True
+                            time.sleep(0.01)
+                            continue
+                else:
+                    if diff < 0 and self.name == 'x' and (state.get('lim_x_a') or state.get('lim_left')):
+                        self.halt()
+                        self.current_pos = 0.0
+                        time.sleep(0.01)
+                        continue
+                    if diff > 0 and self.name == 'x' and (state.get('lim_x_c') or state.get('lim_right')):
+                        self.halt()
+                        time.sleep(0.01)
+                        continue
+                    if diff < 0 and self.name in ('z', 'y') and (state.get('lim_z_d') or state.get('lim_up') or state.get('lim_z_e') or state.get('lim_down')):
+                        self.halt()
+                        self.current_pos = 0.0
+                        time.sleep(0.01)
+                        continue
 
                 if not IS_RASPBERRY_PI:
-                    # 模擬模式：以 50Hz 平滑步進精確模擬運動，杜絕 Windows timer 睡眠延遲與高 CPU 占用
-                    time.sleep(0.02)
+                    # 模擬模式：以 100Hz 高速平滑步進精確模擬運動
+                    time.sleep(0.01)
                     self.current_speed_hz = self.max_speed_hz
-                    step_chunk = min(abs(diff), (self.max_speed_hz / self.steps_per_unit) * 0.02)
+                    step_chunk = min(abs(diff), (self.max_speed_hz / self.steps_per_unit) * 0.01)
                     if diff > 0:
                         self.current_pos += step_chunk
                     else:
                         self.current_pos -= step_chunk
                     continue
 
-                # 實際樹梅派模式：使用 time.sleep 釋放 Python GIL，避免忙等迴圈卡死 Flask/WebSocket 執行緒導致斷線
+                # 實際樹莓派模式：閉迴路步進批次脈衝輸出
                 direction = GPIO.HIGH if diff > 0 else GPIO.LOW
                 GPIO.output(self.dir_pin, direction)
+                batch = max(1, min(25, int(dist_steps)))
+                step_delay = max(0.000004, (1.0 / max(100.0, self.current_speed_hz)) - 0.000004)
+                actual_steps = 0
+                for _ in range(batch):
+                    if self.pause_for_homing or not self.enabled:
+                        break
+                    GPIO.output(self.pul_pin, GPIO.HIGH)
+                    t0 = time.perf_counter()
+                    while time.perf_counter() - t0 < 0.000004:
+                        pass
+                    GPIO.output(self.pul_pin, GPIO.LOW)
+                    if step_delay > 0.0003:
+                        time.sleep(step_delay - 0.00015)
+                    t1 = time.perf_counter()
+                    while time.perf_counter() - t1 < min(step_delay, 0.0002):
+                        pass
+                    actual_steps += 1
 
-                GPIO.output(self.pul_pin, GPIO.HIGH)
-                time.sleep(0.00001)
-                GPIO.output(self.pul_pin, GPIO.LOW)
-
-                step_delay = max(0.0002, (1.0 / self.current_speed_hz) - 0.00001)
-                time.sleep(step_delay)
-
-                if diff > 0:
-                    self.current_pos += step_val
-                else:
-                    self.current_pos -= step_val
+                if actual_steps > 0:
+                    delta_pos = actual_steps * step_val
+                    if diff > 0:
+                        self.current_pos = min(self.target_pos, self.current_pos + delta_pos)
+                    else:
+                        self.current_pos = max(self.target_pos, self.current_pos - delta_pos)
             else:
                 self.current_speed_hz = self.min_speed_hz
-                time.sleep(0.005)
+                time.sleep(0.002)
 
     def stop(self):
         self.running = False
@@ -587,8 +638,8 @@ def _execute_hardware_homing(target_axes):
         if ax == 'x':
             lim_pin = PIN['LIM_X_A']
             state_key = 'lim_x_a'
-            home_pos = float(state['x_min'])
-            min_bound = float(state['x_min'])
+            home_pos = 0.0
+            min_bound = 0.0
             max_bound = float(state['x_max'])
             seek_dir = GPIO.LOW      # 負方向朝 a 點歸零
             backoff_dir = GPIO.HIGH  # 正方向退開
@@ -596,12 +647,12 @@ def _execute_hardware_homing(target_axes):
         else: # z or y
             lim_pin = PIN['LIM_Z_D']
             state_key = 'lim_z_d'
-            home_pos = float(state.get('z_max', state['y_max']))
-            min_bound = float(state.get('z_min', state['y_min']))
+            home_pos = 0.0
+            min_bound = 0.0
             max_bound = float(state.get('z_max', state['y_max']))
-            seek_dir = GPIO.HIGH     # 正方向朝 d 點向上歸零
-            backoff_dir = GPIO.LOW   # 負方向向下退開
-            step_sign = 1.0
+            seek_dir = GPIO.LOW     # 朝原點歸零
+            backoff_dir = GPIO.HIGH  # 退開
+            step_sign = -1.0
 
         step_val = 1.0 / st.steps_per_unit
         GPIO.output(st.ena_pin, GPIO.LOW) # 確保致能通電
@@ -625,14 +676,15 @@ def _execute_hardware_homing(target_axes):
             'timed_out': False
         })
 
-    # ── 階段 A: 預先檢查 - 若原先已壓在接近開關上，先慢速退開 ────
+    # ── 階段 A: 預先檢查 - 若原先已壓在接近開關或霍爾開關上，先慢速退開 ────
     for cfg in axis_configs:
-        if not GPIO.input(cfg['lim_pin']):  # PUD_UP: 低電位 = 觸發
-            add_history(f"{cfg['name'].upper()} 軸接近開關處於壓下狀態，執行預先退開...", "info")
+        is_sensor_active = not GPIO.input(cfg['lim_pin']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+        if is_sensor_active:
+            add_history(f"{cfg['name'].upper()} 軸感測器處於觸發狀態，執行預先退開...", "info")
             GPIO.output(cfg['dir_pin'], cfg['backoff_dir'])
             pre_step_interval = 1.0 / 250.0
             pre_steps = 0
-            while not GPIO.input(cfg['lim_pin']) and pre_steps < 3000:
+            while (not GPIO.input(cfg['lim_pin']) or not GPIO.input(PIN['HALL_1'])) and pre_steps < 3000:
                 if homing_abort_event.is_set():
                     add_history("歸零程序被中止（緊急停止）", "warn")
                     return
@@ -652,9 +704,9 @@ def _execute_hardware_homing(target_axes):
                 time.sleep(max(0.0005, pre_step_interval - 0.00001))
 
     # ── 階段 B: 平穩逼近 (Toward Origin / Seek) ───────────────────
-    homing_hz = max(150.0, min(800.0, float(state.get('homing_speed_hz', 400.0))))
+    homing_hz = max(150.0, min(25000.0, float(state.get('homing_speed_hz', 2500.0))))
     step_interval = 1.0 / homing_hz
-    max_steps = 20000
+    max_steps = 500000
 
     for cfg in axis_configs:
         GPIO.output(cfg['dir_pin'], cfg['seek_dir'])
@@ -670,17 +722,13 @@ def _execute_hardware_homing(target_axes):
 
         for cfg in axis_configs:
             if not cfg['triggered']:
-                pin_low = not GPIO.input(cfg['lim_pin'])  # 觸發現位接近開關
-                reached_soft_limit = (cfg['stepper'].current_pos >= cfg['home_pos']) if cfg['step_sign'] > 0 else (cfg['stepper'].current_pos <= cfg['home_pos'])
-                if pin_low or reached_soft_limit:
+                pin_low = not GPIO.input(cfg['lim_pin']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+                if pin_low:
                     cfg['triggered'] = True
-                    cfg['sensor_hit'] = pin_low
-                    cfg['stepper'].set_position(cfg['home_pos'])
-                    if pin_low:
-                        state[cfg['state_key']] = True
-                        add_history(f"{cfg['name'].upper()} 軸平穩觸發現位接近開關", "info")
-                    else:
-                        add_history(f"{cfg['name'].upper()} 軸已達歸零軟體上限 ({int(cfg['home_pos'])} µs)，安全鎖定原點", "info")
+                    cfg['sensor_hit'] = True
+                    cfg['stepper'].set_position(0.0)
+                    state[cfg['state_key']] = True
+                    add_history(f"{cfg['name'].upper()} 軸平穩觸發現位接近開關/霍爾開關，捕獲原點！", "info")
                 else:
                     GPIO.output(cfg['pul_pin'], GPIO.HIGH)
                     active_pulse.append(cfg)
@@ -701,8 +749,8 @@ def _execute_hardware_homing(target_axes):
     for cfg in axis_configs:
         if not cfg['triggered']:
             cfg['timed_out'] = True
-            cfg['stepper'].set_position(cfg['home_pos'])
-            add_history(f"{cfg['name'].upper()} 軸歸零警告: 超時未觸發接近開關，已鎖定於上限 ({int(cfg['home_pos'])} µs)", "warn")
+            cfg['stepper'].set_position(0.0)
+            add_history(f"{cfg['name'].upper()} 軸歸零警告: 超時未觸發接近開關，鎖定於原點", "warn")
 
     # ── 階段 C: 精準退開至開關剛釋放 (Pull-off / Latch) ─────────────
     backoff_hz = 250.0
@@ -732,11 +780,25 @@ def _execute_hardware_homing(target_axes):
                 GPIO.output(cfg['pul_pin'], GPIO.LOW)
                 time.sleep(max(0.0005, backoff_interval - 0.00001))
 
-        # 標記歸零點座標並夾限保護，確保絕不超過上限
-        cfg['stepper'].set_position(cfg['home_pos'])
-        cfg['stepper'].set_target(cfg['home_pos'], cfg['min_bound'], cfg['max_bound'])
+        # 標記歸零點座標並夾限保護，確保坐標完全歸零為 0.0
+        cfg['stepper'].set_position(0.0)
+        cfg['stepper'].set_target(0.0, 0.0, cfg['max_bound'])
         state[cfg['state_key']] = False
-        add_history(f"{cfg['name'].upper()} 軸平穩歸零完成 (已精準校準原點)", "success")
+        if cfg['name'] == 'x':
+            state['x_pulse'] = 0
+            state['x_mm'] = 0.0
+            state['x_pct'] = 0.0
+            state['x_homed'] = True
+        else:
+            state['z_pulse'] = 0
+            state['z_mm'] = 0.0
+            state['z_pct'] = 0.0
+            state['y1_pulse'] = 0
+            state['y2_pulse'] = 0
+            state['y_mm'] = 0.0
+            state['y_pct'] = 0.0
+            state['z_homed'] = True
+        add_history(f"{cfg['name'].upper()} 軸平穩歸零完成 (坐標點已精準歸零：0.0 mm / 0 µs)", "success")
 
 def _execute_simulation_homing(target_axes):
     """模擬環境平滑歸零核心 (X回a點, Z回d點)"""
@@ -747,9 +809,9 @@ def _execute_simulation_homing(target_axes):
     for ax in target_axes:
         st = x_stepper if ax == 'x' else (z_stepper or y_stepper)
         start_positions[ax] = float(st.current_pos)
-        target_positions[ax] = float(state['x_min'] if ax == 'x' else state.get('z_max', state['y_max']))
+        target_positions[ax] = 0.0
 
-    steps_cnt = 30
+    steps_cnt = 20
     for i in range(steps_cnt):
         if homing_abort_event.is_set():
             add_history("歸零程序被中止（緊急停止）", "warn")
@@ -758,24 +820,38 @@ def _execute_simulation_homing(target_axes):
         ratio = (i + 1) / steps_cnt
         for ax in target_axes:
             st = x_stepper if ax == 'x' else (z_stepper or y_stepper)
-            st.current_pos = start_positions[ax] - (start_positions[ax] - target_positions[ax]) * ratio
-        time.sleep(0.035)
+            st.current_pos = start_positions[ax] - start_positions[ax] * ratio
+        time.sleep(0.02)
 
     # 模擬觸發現位瞬間反饋
     for ax in target_axes:
         key = 'lim_x_a' if ax == 'x' else 'lim_z_d'
         state[key] = True
         state['lim_left' if ax == 'x' else 'lim_up'] = True
-    time.sleep(0.1)
+    time.sleep(0.05)
 
     for ax in target_axes:
         st = x_stepper if ax == 'x' else (z_stepper or y_stepper)
-        st.set_position(target_positions[ax])
-        st.set_target(target_positions[ax])
+        st.set_position(0.0)
+        st.set_target(0.0)
         key = 'lim_x_a' if ax == 'x' else 'lim_z_d'
         state[key] = False
         state['lim_left' if ax == 'x' else 'lim_up'] = False
-        add_history(f"{ax.upper()} 軸平穩歸零完成 (已回原點)", "success")
+        if ax == 'x':
+            state['x_pulse'] = 0
+            state['x_mm'] = 0.0
+            state['x_pct'] = 0.0
+            state['x_homed'] = True
+        else:
+            state['z_pulse'] = 0
+            state['z_mm'] = 0.0
+            state['z_pct'] = 0.0
+            state['y1_pulse'] = 0
+            state['y2_pulse'] = 0
+            state['y_mm'] = 0.0
+            state['y_pct'] = 0.0
+            state['z_homed'] = True
+        add_history(f"{ax.upper()} 軸平穩歸零完成 (坐標點已精準歸零：0.0 mm / 0 µs)", "success")
 
 def _home_single_axis(axis_name):
     """單軸歸零相容介面"""
@@ -857,6 +933,11 @@ def broadcast_state():
                 raw_x_mm = x_min_mm_base + max(0.0, (x_clamped - state['x_min']) / max(0.001, state['x_scale']))
                 state['x_mm'] = round(max(x_min_mm_base, min(state['x_max_mm'], raw_x_mm)), 1)
             
+                if (state.get('lim_x_a') or state.get('lim_left')) and x_clamped <= float(state['x_min']) + 15.0:
+                    state['x_pulse'] = 0
+                    state['x_mm'] = 0.0
+                    state['x_pct'] = 0.0
+            
             st_z = z_stepper or y_stepper
             if st_z:
                 z_min = state.get('z_min', state['y_min'])
@@ -866,6 +947,11 @@ def broadcast_state():
                 state['z_pct'] = max(0.0, min(100.0, (z_clamped - z_min) / max(1, z_max - z_min) * 100.0))
                 raw_z_mm = z_min_mm_base + max(0.0, (z_clamped - z_min) / max(0.001, z_scale))
                 state['z_mm'] = round(max(z_min_mm_base, min(state['z_max_mm'], raw_z_mm)), 1)
+
+                if (state.get('lim_z_d') or state.get('lim_up')) and z_clamped <= float(z_min) + 15.0:
+                    state['z_pulse'] = 0
+                    state['z_mm'] = 0.0
+                    state['z_pct'] = 0.0
 
                 # 同步保持 y 鍵名以確保所有舊版前端元件皆向下相容
                 state['y1_pulse'] = state['z_pulse']
@@ -969,21 +1055,36 @@ def api_move():
         target_us = base_min + float(target_mm) * float(scale)
 
     try:
+        hw_lim_xa = state.get('lim_x_a') or state.get('lim_left') or (IS_RASPBERRY_PI and (not GPIO.input(PIN['LIM_X_A']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])))
+        hw_lim_xc = state.get('lim_x_c') or state.get('lim_right') or (IS_RASPBERRY_PI and not GPIO.input(PIN['LIM_X_C']))
+        hw_lim_zd = state.get('lim_z_d') or state.get('lim_up') or (IS_RASPBERRY_PI and (not GPIO.input(PIN['LIM_Z_D']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])))
+        hw_lim_ze = state.get('lim_z_e') or state.get('lim_down') or (IS_RASPBERRY_PI and not GPIO.input(PIN['LIM_Z_E']))
+
         if axis == 'x':
             if delta_us is not None:
                 delta_us = float(delta_us)
-                if (state.get('lim_x_a') or state.get('lim_left')) and delta_us < 0:
-                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_X_A', 'X 軸 a 點左側限位開關觸發，攔截負向移動')
-                    return jsonify({'ok': False, 'msg': 'X 軸 a 點左側限位觸發'})
-                if (state.get('lim_x_c') or state.get('lim_right')) and delta_us > 0:
+                if hw_lim_xa and delta_us < 0:
+                    if x_stepper:
+                        x_stepper.halt()
+                        x_stepper.set_position(0.0)
+                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_X_A', 'X 軸 a 點左側原點霍爾/限位開關觸發，坐標歸零並攔截向後移動')
+                    return jsonify({'ok': False, 'msg': 'X 軸原點限位觸發，已歸零並禁止繼續向後移動'})
+                if hw_lim_xc and delta_us > 0:
+                    if x_stepper:
+                        x_stepper.halt()
                     add_error_log('WARN', 'MOTION', 'ERR_LIMIT_X_C', 'X 軸 c 點右側限位開關觸發，攔截正向移動')
                     return jsonify({'ok': False, 'msg': 'X 軸 c 點右側限位觸發'})
                 if x_stepper:
-                    x_stepper.add_target_delta(delta_us, state['x_min'], state['x_max'])
+                    x_stepper.add_target_delta(delta_us, 0.0, state['x_max'])
             elif target_us is not None:
                 target_us = float(target_us)
+                if hw_lim_xa and target_us <= 0.0:
+                    if x_stepper:
+                        x_stepper.halt()
+                        x_stepper.set_position(0.0)
+                    return jsonify({'ok': False, 'msg': 'X 軸已在原點，禁止繼續向後移動'})
                 if x_stepper:
-                    x_stepper.set_target(target_us, state['x_min'], state['x_max'])
+                    x_stepper.set_target(target_us, 0.0, state['x_max'])
 
         elif axis in ('z', 'y', 'y1', 'y2'):
             st_z = z_stepper or y_stepper
@@ -991,18 +1092,28 @@ def api_move():
             z_max = state.get('z_max', state['y_max'])
             if delta_us is not None:
                 delta_us = float(delta_us)
-                if (state.get('lim_z_e') or state.get('lim_down')) and delta_us < 0:
-                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_Z_E', 'Z 軸 e 點下極限開關觸發，攔截向下移動')
-                    return jsonify({'ok': False, 'msg': 'Z 軸 e 點下極限觸發'})
-                if (state.get('lim_z_d') or state.get('lim_up')) and delta_us > 0:
-                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_Z_D', 'Z 軸 d 點上歸零開關觸發，攔截向上移動')
-                    return jsonify({'ok': False, 'msg': 'Z 軸 d 點上歸零觸發'})
+                if (hw_lim_zd or hw_lim_ze) and delta_us < 0:
+                    if st_z:
+                        st_z.halt()
+                        st_z.set_position(0.0)
+                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_Z_D', 'Z 軸原點霍爾/限位開關觸發，坐標歸零並攔截向後移動')
+                    return jsonify({'ok': False, 'msg': 'Z 軸原點限位觸發，已歸零並禁止繼續向後移動'})
+                if hw_lim_zd and delta_us > 0:
+                    if st_z:
+                        st_z.halt()
+                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_Z_D', 'Z 軸上極限觸發，攔截正向移動')
+                    return jsonify({'ok': False, 'msg': 'Z 軸限位觸發'})
                 if st_z:
-                    st_z.add_target_delta(delta_us, z_min, z_max)
+                    st_z.add_target_delta(delta_us, 0.0, z_max)
             elif target_us is not None:
                 target_us = float(target_us)
+                if (hw_lim_zd or hw_lim_ze) and target_us <= 0.0:
+                    if st_z:
+                        st_z.halt()
+                        st_z.set_position(0.0)
+                    return jsonify({'ok': False, 'msg': 'Z 軸已在原點，禁止繼續向後移動'})
                 if st_z:
-                    st_z.set_target(target_us, z_min, z_max)
+                    st_z.set_target(target_us, 0.0, z_max)
 
         return jsonify({'ok': True, 'x_pulse': state['x_pulse'],
                         'z_pulse': state['z_pulse'], 'y1_pulse': state['y1_pulse'], 'y2_pulse': state['y2_pulse']})
@@ -1509,9 +1620,58 @@ def run_macro_loop(commands):
             msg = " ".join(parts[1:])
             add_history(f"巨集提示: {msg}", "success")
             socketio.emit('macro_msg', {'msg': msg})
-            
+
+        elif op in ('G0', 'G00', 'G1', 'G01'):
+            target_x = None
+            target_z = None
+            for tok in parts[1:]:
+                t_up = tok.upper()
+                if t_up.startswith('X'):
+                    try: target_x = float(t_up[1:])
+                    except ValueError: pass
+                elif t_up.startswith('Y') or t_up.startswith('Z'):
+                    try: target_z = float(t_up[1:])
+                    except ValueError: pass
+            if target_x is not None:
+                px = (state['x_min'] + target_x * state['x_scale']) if target_x <= 400.0 else target_x
+                set_servo_pulse('x', px)
+                _wait_motor_target('x', px)
+            if target_z is not None:
+                z_min = state.get('z_min', state['y_min'])
+                z_sc = state.get('z_scale', state['y_scale'])
+                pz = (z_min + target_z * z_sc) if target_z <= 400.0 else target_z
+                set_servo_pulse('z', pz)
+                _wait_motor_target('z', pz)
+
+        elif op == 'G28':
+            add_history("G-Code G28: 執行雙軸安全歸零", "info")
+            home_axis('all')
+
+        elif op in ('G4', 'G04'):
+            ms = 500.0
+            for tok in parts[1:]:
+                t_up = tok.upper()
+                if t_up.startswith('P'):
+                    try: ms = float(t_up[1:])
+                    except ValueError: pass
+                elif t_up.startswith('S'):
+                    try: ms = float(t_up[1:]) * 1000.0
+                    except ValueError: pass
+            time.sleep(max(0.0, ms / 1000.0))
+
+        elif op in ('M3', 'M4', 'M106'):
+            set_digital_output('magnet', True)
+            add_history("G-Code: 電磁鐵通電吸附 ON", "info")
+            time.sleep(0.3)
+
+        elif op in ('M5', 'M107'):
+            set_digital_output('magnet', False)
+            add_history("G-Code: 電磁鐵斷電釋放 OFF", "info")
+            time.sleep(0.3)
+
         else:
-            add_history(f"巨集錯誤: 未知指令 '{op}'", "error")
+            if not op.startswith(';') and not op.startswith('('):
+                add_history(f"巨集錯誤: 未知指令 '{op}'", "error")
             
     macro_running = False
     socketio.emit('macro_status', {'running': False, 'paused': False, 'current_line': 0})
@@ -1549,10 +1709,20 @@ def api_stop():
     add_history("系統緊急停止（斷開電磁鐵吸盤＋強制雙軸煞車）", "warn")
     return jsonify({'ok': True})
 
+def is_motion_busy():
+    if state.get('is_homing', False):
+        return '目前正在執行馬達歸零程序，請等待歸零完成'
+    if state.get('pickup_active', False):
+        return '目前 14 步衝壓搬運自動循環正在運行中，請先停止循環'
+    if macro_running:
+        return '目前積木程式 / G-code 巨集正在執行中，請先停止巨集'
+    return None
+
 @app.route('/api/home', methods=['POST'])
 def api_home():
-    if state.get('is_homing', False):
-        return jsonify({'ok': False, 'msg': '歸零流程執行中，請稍候...'})
+    busy_msg = is_motion_busy()
+    if busy_msg:
+        return jsonify({'ok': False, 'msg': busy_msg})
     data = request.get_json(silent=True) or {}
     axis = str(data.get('axis', 'all')).lower()
     add_history(f"手動點擊馬達歸零 ({axis.upper()})", "info")
@@ -1617,18 +1787,32 @@ def api_pickup():
     """
     if not state['system_run']:
         return jsonify({'ok': False, 'msg': '系統未啟動，請先按下 START PB'})
-    if state.get('pickup_active', False):
-        return jsonify({'ok': False, 'msg': '自動衝壓循環已在執行中'})
+    busy_msg = is_motion_busy()
+    if busy_msg:
+        return jsonify({'ok': False, 'msg': busy_msg})
 
-    def _wait_motor_reach(motor, target, tolerance=15, timeout=12.0):
+    def _wait_motor_reach(motor, target, tolerance=15, timeout=12.0, require_metal=False):
         start = time.time()
         while state['pickup_active'] and state['system_run']:
+            if require_metal:
+                read_limit_switches()
+                if not state.get('hall_arm_metal'):
+                    if x_stepper: x_stepper.halt()
+                    if z_stepper: z_stepper.halt()
+                    set_digital_output('magnet', False)
+                    msg = "搬運途中檢測到金屬工件脫落 (霍爾感測訊號中斷)，緊急煞車停機！"
+                    state['error'] = True
+                    state['error_msg'] = msg
+                    state['pickup_active'] = False
+                    add_error_log('CRITICAL', 'HALL', 'ERR_HALL_IN_FLIGHT_DROP', msg)
+                    add_history(f"❌ 緊急警報：{msg}", "error")
+                    return False
             if motor is None or abs(motor.current_pos - target) <= tolerance:
                 return True
             if time.time() - start > timeout:
                 add_history(f"到位警告：馬達到位超時（目標={target:.0f}µs，當前={motor.current_pos:.0f}µs）", "warn")
                 return False
-            time.sleep(0.04)
+            time.sleep(0.03)
         return False
 
     def stamping_cycle_sequence():
@@ -1636,6 +1820,9 @@ def api_pickup():
         mode_str = "連續生產模式" if state.get('continuous_mode') else "單次循環模式"
         add_history(f"🚀 衝壓自動化取放料開始運轉 ({mode_str}，目標: {state['cycle_target']} 次)", "success")
         try:
+            if not state.get('x_homed') or not state.get('z_homed'):
+                add_history("⚠️ 啟動前原點安全互鎖：雙軸尚未校準原點，自動執行雙軸安全歸零...", "info")
+                home_axis('all')
             st_x = x_stepper
             st_z = z_stepper or y_stepper
             pos_x_a = float(state['x_min'])                                  # a 點 (歸零)
@@ -1697,20 +1884,20 @@ def api_pickup():
                 add_history(f"✔ 霍爾感測確認：金屬工件吸附正常 ({state.get('hall_active_count', 8)}/8 顆觸發，{state.get('hall_group_count', 4)}/4 組就緒)！", "success")
                 time.sleep(0.2)
 
-                # 步驟 6: X 軸到 c 點 (向右極限/放料點)
+                # 步驟 6: X 軸到 c 點 (向右極限/放料點，搬運途中即時監控防掉件)
                 if not state['system_run']: break
                 socketio.emit('pickup_step', {'step': 'move-mold2', 'desc': '6. X軸前往c點'})
-                add_history("步驟 6/14: X 軸移動至 c 點 (向右極限放料點)...", "info")
+                add_history("步驟 6/14: X 軸移動至 c 點 (向右極限放料點，全程監控防掉件)...", "info")
                 set_servo_pulse('x', pos_x_c)
-                if not _wait_motor_reach(st_x, pos_x_c): break
+                if not _wait_motor_reach(st_x, pos_x_c, require_metal=True): break
                 time.sleep(0.2)
 
-                # 步驟 7: Z 軸下去 (到達 e 點)
+                # 步驟 7: Z 軸下去 (到達 e 點，搬運途中即時監控防掉件)
                 if not state['system_run']: break
                 socketio.emit('pickup_step', {'step': 'drop', 'desc': '7. Z軸下降至e點'})
                 add_history("步驟 7/14: Z 軸下降至 e 點 (放料深度)...", "info")
                 set_servo_pulse('z', pos_z_e)
-                if not _wait_motor_reach(st_z, pos_z_e): break
+                if not _wait_motor_reach(st_z, pos_z_e, require_metal=True): break
                 time.sleep(0.2)
 
                 # 步驟 8: 圓形電磁鐵關電 (釋放工件)
@@ -1909,24 +2096,26 @@ def api_set_limits():
         except (ValueError, TypeError):
             pass
 
-    # 支援 mm 與 µs 設定 X 軸（完全解除 2500µs 限制，最高可設 200,000µs）
-    if 'x_min_mm' in data or 'x_max_mm' in data:
-        min_mm = float(data.get('x_min_mm', state.get('x_min_mm', 0.0)))
+    # 支援 mm 與 µs 設定 X 軸（支援 0 起算與閉迴路大行程脈衝，最高可設 200,000µs）
+    if 'x_min' in data or 'x_max' in data:
+        if 'x_min' in data:
+            state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(float(data['x_min'])))))
+        if 'x_max' in data:
+            state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(data['x_max'])))))
+        if state['x_max'] <= state['x_min']:
+            state['x_max'] = min(SYSTEM_PULSE_MAX, state['x_min'] + 1)
+        state['x_min_mm'] = 0.0 if state['x_min'] in (0, PULSE_MIN) else round(state['x_min'] / max(0.001, state['x_scale']), 1)
+        state['x_max_mm'] = round(state['x_min_mm'] + (state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+    elif 'x_min_mm' in data or 'x_max_mm' in data:
+        min_mm = max(0.0, float(data.get('x_min_mm', state.get('x_min_mm', 0.0))))
         max_mm = float(data.get('x_max_mm', state.get('x_max_mm', 200.0)))
         if max_mm <= min_mm:
             max_mm = min_mm + 1.0
         state['x_min_mm'] = round(min_mm, 1)
         state['x_max_mm'] = round(max_mm, 1)
-        state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + min_mm * state['x_scale']))))
-        state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + max_mm * state['x_scale']))))
-    else:
-        if 'x_min' in data:
-            state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(float(data['x_min'])))))
-        if 'x_max' in data:
-            state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(data['x_max'])))))
-        if 'x_min' in data or 'x_max' in data:
-            state['x_min_mm'] = round(max(0.0, (state['x_min'] - PULSE_MIN) / max(0.001, state['x_scale'])), 1)
-            state['x_max_mm'] = round(state['x_min_mm'] + (state['x_max'] - state['x_min']) / max(0.001, state['x_scale']), 1)
+        base_us = PULSE_MIN if (state['x_min'] == PULSE_MIN and min_mm == 0.0) else 0.0
+        state['x_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(base_us + min_mm * state['x_scale']))))
+        state['x_max'] = max(state['x_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(base_us + max_mm * state['x_scale']))))
 
     # 若 X 軸當前位置超出新設定之範圍，安全夾限至範圍內
     if x_stepper:
@@ -1936,30 +2125,34 @@ def api_set_limits():
             x_stepper.set_target(clamped_x, state['x_min'], state['x_max'])
         state['x_pulse'] = int(x_stepper.current_pos)
 
-    # 支援 mm 與 µs 設定 Z/Y 軸
+    # 支援 mm 與 µs 設定 Z/Y 軸（支援 0 起算與閉迴路大行程脈衝）
+    z_min_in = data.get('z_min', data.get('y_min'))
+    z_max_in = data.get('z_max', data.get('y_max'))
     z_min_mm_in = data.get('z_min_mm', data.get('y_min_mm'))
     z_max_mm_in = data.get('z_max_mm', data.get('y_max_mm'))
-    if z_min_mm_in is not None or z_max_mm_in is not None:
+    if z_min_in is not None or z_max_in is not None:
+        if z_min_in is not None:
+            state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(float(z_min_in)))))
+        if z_max_in is not None:
+            state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(z_max_in)))))
+        if state['z_max'] <= state['z_min']:
+            state['z_max'] = state['y_max'] = min(SYSTEM_PULSE_MAX, state['z_min'] + 1)
         scale = state.get('z_scale', state['y_scale'])
-        min_mm = float(z_min_mm_in if z_min_mm_in is not None else state.get('z_min_mm', 0.0))
+        r_min = 0.0 if state['z_min'] in (0, PULSE_MIN) else round(state['z_min'] / max(0.001, scale), 1)
+        r_max = round(r_min + (state['z_max'] - state['z_min']) / max(0.001, scale), 1)
+        state['z_min_mm'] = state['y_min_mm'] = r_min
+        state['z_max_mm'] = state['y_max_mm'] = r_max
+    elif z_min_mm_in is not None or z_max_mm_in is not None:
+        scale = state.get('z_scale', state['y_scale'])
+        min_mm = max(0.0, float(z_min_mm_in if z_min_mm_in is not None else state.get('z_min_mm', 0.0)))
         max_mm = float(z_max_mm_in if z_max_mm_in is not None else state.get('z_max_mm', 200.0))
         if max_mm <= min_mm:
             max_mm = min_mm + 1.0
         state['z_min_mm'] = state['y_min_mm'] = round(min_mm, 1)
         state['z_max_mm'] = state['y_max_mm'] = round(max_mm, 1)
-        state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + min_mm * scale))))
-        state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(PULSE_MIN + max_mm * scale))))
-    else:
-        if 'z_min' in data or 'y_min' in data:
-            val = data.get('z_min', data.get('y_min'))
-            state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(float(val)))))
-        if 'z_max' in data or 'y_max' in data:
-            val = data.get('z_max', data.get('y_max'))
-            state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(float(val)))))
-        if 'z_min' in data or 'y_min' in data or 'z_max' in data or 'y_max' in data:
-            scale = state.get('z_scale', state['y_scale'])
-            state['z_min_mm'] = state['y_min_mm'] = round(max(0.0, (state['z_min'] - PULSE_MIN) / max(0.001, scale)), 1)
-            state['z_max_mm'] = state['y_max_mm'] = round(state['z_min_mm'] + (state['z_max'] - state['z_min']) / max(0.001, scale), 1)
+        base_us = PULSE_MIN if (state['z_min'] == PULSE_MIN and min_mm == 0.0) else 0.0
+        state['z_min'] = state['y_min'] = max(0, min(SYSTEM_PULSE_MAX, int(round(base_us + min_mm * scale))))
+        state['z_max'] = state['y_max'] = max(state['z_min'] + 1, min(SYSTEM_PULSE_MAX, int(round(base_us + max_mm * scale))))
 
     st_z = z_stepper or y_stepper
     if st_z:
@@ -1992,7 +2185,7 @@ def api_set_limits():
         if st_z: st_z.accel_steps = acc_val
         
     if 'homing_speed_hz' in data:
-        state['homing_speed_hz'] = max(100.0, min(2000.0, float(data['homing_speed_hz'])))
+        state['homing_speed_hz'] = max(100.0, min(25000.0, float(data['homing_speed_hz'])))
 
     # 若單獨調整了 x_scale / z_scale，重新換算對應 mm 範圍
     if 'x_scale' in data and 'x_min_mm' not in data and 'x_max_mm' not in data:

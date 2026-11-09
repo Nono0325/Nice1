@@ -127,7 +127,11 @@
       <span id="navUpdateBadgeText">有新版本可更新</span>
     </button>
     <div class="time-display" id="clockDisplay">--:--:--</div>
-    <div style="display:flex;gap:6px;margin-left:6px">
+    <button type="button" class="btn btn-danger" id="btnNavbarEstop" onclick="cmdStop()" title="全站緊急停止 (快捷鍵: Esc / Space)"
+      style="padding:5px 12px;font-size:12px;font-weight:800;letter-spacing:0.5px;border-radius:8px;box-shadow:0 0 14px rgba(239,68,68,0.45);margin-left:4px">
+      🛑 緊急停止
+    </button>
+    <div style="display:flex;gap:6px;margin-left:4px">
       <button class="btn btn-warning" id="btnGlobalLogout" onclick="siteLogout()" title="登出系統" style="padding:4px 10px;font-size:11px;display:none">🔒 登出</button>
     </div>
   </div>
@@ -830,51 +834,51 @@
       <div class="card-title"><span class="icon">⚡</span>馬達加減速、慢速歸零與物理比例設定</div>
       <div class="grid-2">
         <div>
-          <h4 style="color:var(--accent-cyan);margin-bottom:14px;font-size:16px">X 軸步進馬達設定</h4>
+          <h4 style="color:var(--accent-cyan);margin-bottom:14px;font-size:16px">X 軸閉迴路步進馬達設定</h4>
           <div style="display:flex;flex-direction:column;gap:14px">
             <div>
-              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大速度頻率 (Max Speed Hz)</label>
-              <input type="number" id="xMaxSpeedInput" value="2000" min="200" max="10000" step="100" style="width:100%">
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大速度頻率 (Max Speed Hz，支援閉迴路高速細分 200 ~ 100,000 Hz)</label>
+              <input type="number" id="xMaxSpeedInput" value="8000" min="100" max="100000" step="100" style="width:100%">
             </div>
             <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">加減速步數 (Accel Steps)</label>
-              <input type="number" id="xAccelStepsInput" value="100" min="10" max="2000" step="10" style="width:100%">
+              <input type="number" id="xAccelStepsInput" value="50" min="1" max="5000" step="10" style="width:100%">
             </div>
             <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">物理行程比例 (µs per mm)</label>
               <input type="number" id="xScaleInput" value="10.0" min="0.001" max="10000" step="any" style="width:100%">
-              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 10，則 1mm = 10µs。</div>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 20，則 1mm = 20µs。</div>
             </div>
           </div>
         </div>
         <div>
-          <h4 style="color:var(--accent-green);margin-bottom:14px;font-size:16px">Y 軸步進馬達設定</h4>
+          <h4 style="color:var(--accent-green);margin-bottom:14px;font-size:16px">Z 軸 (Y 軸) 閉迴路步進馬達設定</h4>
           <div style="display:flex;flex-direction:column;gap:14px">
             <div>
-              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大速度頻率 (Max Speed Hz)</label>
-              <input type="number" id="yMaxSpeedInput" value="2000" min="200" max="10000" step="100" style="width:100%">
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">最大速度頻率 (Max Speed Hz，支援閉迴路高速細分 200 ~ 100,000 Hz)</label>
+              <input type="number" id="yMaxSpeedInput" value="8000" min="100" max="100000" step="100" style="width:100%">
             </div>
             <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">加減速步數 (Accel Steps)</label>
-              <input type="number" id="yAccelStepsInput" value="100" min="10" max="2000" step="10" style="width:100%">
+              <input type="number" id="yAccelStepsInput" value="50" min="1" max="5000" step="10" style="width:100%">
             </div>
             <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">物理行程比例 (µs per mm)</label>
               <input type="number" id="yScaleInput" value="10.0" min="0.001" max="10000" step="any" style="width:100%">
-              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 10，則 1mm = 10µs。</div>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 20，則 1mm = 20µs。</div>
             </div>
           </div>
         </div>
       </div>
       <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-        <h4 style="color:var(--accent-amber);margin-bottom:12px;font-size:15px">🐢 安全平穩歸零設定</h4>
+        <h4 style="color:var(--accent-amber);margin-bottom:12px;font-size:15px">⚡ 閉迴路步進歸零頻率設定</h4>
         <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
           <div style="flex:1;min-width:240px">
-            <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">歸零緩速逼近頻率 (Homing Speed Hz) — 慢慢歸零避免衝擊</label>
-            <input type="number" id="homingSpeedInput" value="400" min="100" max="2000" step="50" style="width:100%">
+            <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">歸零逼近頻率 (Homing Speed Hz，支援 100 ~ 25,000 Hz)</label>
+            <input type="number" id="homingSpeedInput" value="2500" min="100" max="25000" step="100" style="width:100%">
           </div>
           <div style="flex:1;min-width:240px;font-size:13px;color:var(--text-dim);line-height:1.5">
-            💡 建議設定為 300~500 Hz，步進馬達將平穩前進並在觸發現位開關後緩慢回退建立精準原點。
+            💡 57BYG 閉迴路步進驅動器高細分下建議設定為 1,500 ~ 6,000 Hz，馬達將快速平穩尋原點並在觸發接近開關後回退校準。
           </div>
         </div>
       </div>

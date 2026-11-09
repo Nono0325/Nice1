@@ -124,16 +124,34 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
         delta_us.unwrap_or(0.0)
     };
 
+    let is_pi = ctx.is_raspberry_pi;
+    let hw_lim_xa = lim_xa || (is_pi && (!ctx.gpio.read_pin(17) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
+    let hw_lim_xc = lim_xc || (is_pi && !ctx.gpio.read_pin(27));
+    let hw_lim_zd = lim_zd || (is_pi && (!ctx.gpio.read_pin(22) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7) || !ctx.gpio.read_pin(8) || !ctx.gpio.read_pin(9)));
+    let hw_lim_ze = lim_ze || (is_pi && !ctx.gpio.read_pin(23));
+
     if axis == "x" {
-        if (lim_xa && delta < 0.0) || (lim_xc && delta > 0.0) {
+        if hw_lim_xa && delta < 0.0 {
+            ctx.x_stepper.halt();
+            ctx.x_stepper.set_position(0.0);
             return;
         }
-        ctx.x_stepper.add_target_delta(delta, x_min, x_max);
+        if hw_lim_xc && delta > 0.0 {
+            ctx.x_stepper.halt();
+            return;
+        }
+        ctx.x_stepper.add_target_delta(delta, 0.0, x_max);
     } else if matches!(axis.as_str(), "z" | "y" | "y1" | "y2") {
-        if (lim_ze && delta < 0.0) || (lim_zd && delta > 0.0) {
+        if (hw_lim_zd || hw_lim_ze) && delta < 0.0 {
+            ctx.z_stepper.halt();
+            ctx.z_stepper.set_position(0.0);
             return;
         }
-        ctx.z_stepper.add_target_delta(delta, z_min, z_max);
+        if hw_lim_zd && delta > 0.0 {
+            ctx.z_stepper.halt();
+            return;
+        }
+        ctx.z_stepper.add_target_delta(delta, 0.0, z_max);
     }
 }
 
@@ -183,33 +201,55 @@ pub async fn api_move(
         target_us = Some(base_min + mm * scale);
     }
 
+    let is_pi = ctx.is_raspberry_pi;
+    let hw_lim_xa = lim_xa || (is_pi && (!ctx.gpio.read_pin(17) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
+    let hw_lim_xc = lim_xc || (is_pi && !ctx.gpio.read_pin(27));
+    let hw_lim_zd = lim_zd || (is_pi && (!ctx.gpio.read_pin(22) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7) || !ctx.gpio.read_pin(8) || !ctx.gpio.read_pin(9)));
+    let hw_lim_ze = lim_ze || (is_pi && !ctx.gpio.read_pin(23));
+
     if axis == "x" {
         if let Some(d) = delta_us {
-            if lim_xa && d < 0.0 {
-                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_A"), "X 軸 a 點左側限位開關觸發，攔截負向移動", None);
-                return Json(json!({ "ok": false, "msg": "X 軸 a 點左側限位觸發" }));
+            if hw_lim_xa && d < 0.0 {
+                ctx.x_stepper.halt();
+                ctx.x_stepper.set_position(0.0);
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_A"), "X 軸 a 點原點霍爾/限位開關觸發，坐標歸零並攔截向後移動", None);
+                return Json(json!({ "ok": false, "msg": "X 軸原點限位觸發，已歸零並禁止繼續向後移動" }));
             }
-            if lim_xc && d > 0.0 {
+            if hw_lim_xc && d > 0.0 {
+                ctx.x_stepper.halt();
                 ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_C"), "X 軸 c 點右側限位開關觸發，攔截正向移動", None);
                 return Json(json!({ "ok": false, "msg": "X 軸 c 點右側限位觸發" }));
             }
-            ctx.x_stepper.add_target_delta(d, x_min, x_max);
+            ctx.x_stepper.add_target_delta(d, 0.0, x_max);
         } else if let Some(t) = target_us {
-            ctx.x_stepper.set_target(t, x_min, x_max);
+            if hw_lim_xa && t <= 0.0 {
+                ctx.x_stepper.halt();
+                ctx.x_stepper.set_position(0.0);
+                return Json(json!({ "ok": false, "msg": "X 軸已在原點，禁止繼續向後移動" }));
+            }
+            ctx.x_stepper.set_target(t, 0.0, x_max);
         }
     } else if matches!(axis.as_str(), "z" | "y" | "y1" | "y2") {
         if let Some(d) = delta_us {
-            if lim_ze && d < 0.0 {
-                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_E"), "Z 軸 e 點下極限開關觸發，攔截向下移動", None);
-                return Json(json!({ "ok": false, "msg": "Z 軸 e 點下極限觸發" }));
+            if (hw_lim_zd || hw_lim_ze) && d < 0.0 {
+                ctx.z_stepper.halt();
+                ctx.z_stepper.set_position(0.0);
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Z 軸原點霍爾/限位開關觸發，坐標歸零並攔截向後移動", None);
+                return Json(json!({ "ok": false, "msg": "Z 軸原點限位觸發，已歸零並禁止繼續向後移動" }));
             }
-            if lim_zd && d > 0.0 {
-                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Z 軸 d 點上歸零開關觸發，攔截向上移動", None);
-                return Json(json!({ "ok": false, "msg": "Z 軸 d 點上歸零觸發" }));
+            if hw_lim_zd && d > 0.0 {
+                ctx.z_stepper.halt();
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Z 軸上極限觸發，攔截正向移動", None);
+                return Json(json!({ "ok": false, "msg": "Z 軸限位觸發" }));
             }
-            ctx.z_stepper.add_target_delta(d, z_min, z_max);
+            ctx.z_stepper.add_target_delta(d, 0.0, z_max);
         } else if let Some(t) = target_us {
-            ctx.z_stepper.set_target(t, z_min, z_max);
+            if (hw_lim_zd || hw_lim_ze) && t <= 0.0 {
+                ctx.z_stepper.halt();
+                ctx.z_stepper.set_position(0.0);
+                return Json(json!({ "ok": false, "msg": "Z 軸已在原點，禁止繼續向後移動" }));
+            }
+            ctx.z_stepper.set_target(t, 0.0, z_max);
         }
     }
 
@@ -316,8 +356,8 @@ pub async fn api_home(
     State(ctx): State<Arc<AppContext>>,
     body: Option<Json<Value>>,
 ) -> impl IntoResponse {
-    if ctx.state.read().unwrap().is_homing {
-        return Json(json!({ "ok": false, "msg": "歸零流程執行中，請稍候..." }));
+    if let Some(reason) = ctx.is_motion_busy() {
+        return Json(json!({ "ok": false, "msg": reason }));
     }
     let axis = body
         .as_ref()
@@ -397,15 +437,15 @@ pub async fn api_z_down(
 }
 
 pub async fn api_pickup(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
-    let (sys_run, pickup_act, cont) = {
+    if let Some(reason) = ctx.is_motion_busy() {
+        return Json(json!({ "ok": false, "msg": reason }));
+    }
+    let (sys_run, cont) = {
         let s = ctx.state.read().unwrap();
-        (s.system_run, s.pickup_active, s.continuous_mode)
+        (s.system_run, s.continuous_mode)
     };
     if !sys_run {
         return Json(json!({ "ok": false, "msg": "系統未啟動，請先按下 START PB" }));
-    }
-    if pickup_act {
-        return Json(json!({ "ok": false, "msg": "自動衝壓循環已在執行中" }));
     }
 
     spawn_stamping_cycle(Arc::clone(&ctx));
@@ -482,40 +522,46 @@ pub async fn api_set_limits(
             s.y_scale = sc;
         }
 
-        // X 軸設定 (支援 mm 與 µs)
+        // X 軸設定 (支援 mm 與 µs，支援 0 起算與閉迴路大行程脈衝)
+        let x_min_in = parse_f64(data.get("x_min"));
+        let x_max_in = parse_f64(data.get("x_max"));
         let x_min_mm_in = parse_f64(data.get("x_min_mm"));
         let x_max_mm_in = parse_f64(data.get("x_max_mm"));
-        if x_min_mm_in.is_some() || x_max_mm_in.is_some() {
-            let min_mm = x_min_mm_in.unwrap_or(s.x_min_mm);
+
+        if x_min_in.is_some() || x_max_in.is_some() {
+            if let Some(xmin) = x_min_in {
+                s.x_min = (xmin.round() as i64).clamp(0, SYSTEM_PULSE_MAX);
+            }
+            if let Some(xmax) = x_max_in {
+                s.x_max = (xmax.round() as i64).clamp(s.x_min + 1, SYSTEM_PULSE_MAX);
+            }
+            if s.x_max <= s.x_min {
+                s.x_max = (s.x_min + 1).min(SYSTEM_PULSE_MAX);
+            }
+            s.x_min_mm = if s.x_min == PULSE_MIN || s.x_min == 0 {
+                0.0
+            } else {
+                ((s.x_min as f64 / s.x_scale.max(0.001)) * 10.0).round() / 10.0
+            };
+            s.x_max_mm = ((s.x_min_mm + (s.x_max - s.x_min) as f64 / s.x_scale.max(0.001)) * 10.0)
+                .round()
+                / 10.0;
+        } else if x_min_mm_in.is_some() || x_max_mm_in.is_some() {
+            let min_mm = x_min_mm_in.unwrap_or(s.x_min_mm).max(0.0);
             let mut max_mm = x_max_mm_in.unwrap_or(s.x_max_mm);
             if max_mm <= min_mm {
                 max_mm = min_mm + 1.0;
             }
             s.x_min_mm = (min_mm * 10.0).round() / 10.0;
             s.x_max_mm = (max_mm * 10.0).round() / 10.0;
-            s.x_min = ((PULSE_MIN as f64 + min_mm * s.x_scale).round() as i64)
-                .clamp(0, SYSTEM_PULSE_MAX);
-            s.x_max = ((PULSE_MIN as f64 + max_mm * s.x_scale).round() as i64)
+            let base_us = if s.x_min == PULSE_MIN && min_mm == 0.0 {
+                PULSE_MIN as f64
+            } else {
+                0.0
+            };
+            s.x_min = ((base_us + min_mm * s.x_scale).round() as i64).clamp(0, SYSTEM_PULSE_MAX);
+            s.x_max = ((base_us + max_mm * s.x_scale).round() as i64)
                 .clamp(s.x_min + 1, SYSTEM_PULSE_MAX);
-        } else {
-            let mut changed_us = false;
-            if let Some(xmin) = parse_f64(data.get("x_min")) {
-                s.x_min = (xmin.round() as i64).clamp(0, SYSTEM_PULSE_MAX);
-                changed_us = true;
-            }
-            if let Some(xmax) = parse_f64(data.get("x_max")) {
-                s.x_max = (xmax.round() as i64).clamp(s.x_min + 1, SYSTEM_PULSE_MAX);
-                changed_us = true;
-            }
-            if changed_us {
-                s.x_min_mm =
-                    (((s.x_min - PULSE_MIN).max(0) as f64 / s.x_scale.max(0.001)) * 10.0).round()
-                        / 10.0;
-                s.x_max_mm = ((s.x_min_mm + (s.x_max - s.x_min) as f64 / s.x_scale.max(0.001))
-                    * 10.0)
-                    .round()
-                    / 10.0;
-            }
         }
 
         let clamped_x = ctx
@@ -528,11 +574,41 @@ pub async fn api_set_limits(
         }
         s.x_pulse = clamped_x as i64;
 
-        // Z / Y 軸設定 (支援 mm 與 µs)
+        // Z / Y 軸設定 (支援 mm 與 µs，支援 0 起算與閉迴路大行程脈衝)
+        let z_min_in = parse_f64(data.get("z_min").or_else(|| data.get("y_min")));
+        let z_max_in = parse_f64(data.get("z_max").or_else(|| data.get("y_max")));
         let z_min_mm_in = parse_f64(data.get("z_min_mm").or_else(|| data.get("y_min_mm")));
         let z_max_mm_in = parse_f64(data.get("z_max_mm").or_else(|| data.get("y_max_mm")));
-        if z_min_mm_in.is_some() || z_max_mm_in.is_some() {
-            let min_mm = z_min_mm_in.unwrap_or(s.z_min_mm);
+
+        if z_min_in.is_some() || z_max_in.is_some() {
+            if let Some(zmin) = z_min_in {
+                let v = (zmin.round() as i64).clamp(0, SYSTEM_PULSE_MAX);
+                s.z_min = v;
+                s.y_min = v;
+            }
+            if let Some(zmax) = z_max_in {
+                let v = (zmax.round() as i64).clamp(s.z_min + 1, SYSTEM_PULSE_MAX);
+                s.z_max = v;
+                s.y_max = v;
+            }
+            if s.z_max <= s.z_min {
+                s.z_max = (s.z_min + 1).min(SYSTEM_PULSE_MAX);
+                s.y_max = s.z_max;
+            }
+            let r_min = if s.z_min == PULSE_MIN || s.z_min == 0 {
+                0.0
+            } else {
+                ((s.z_min as f64 / s.z_scale.max(0.001)) * 10.0).round() / 10.0
+            };
+            let r_max = ((r_min + (s.z_max - s.z_min) as f64 / s.z_scale.max(0.001)) * 10.0)
+                .round()
+                / 10.0;
+            s.z_min_mm = r_min;
+            s.y_min_mm = r_min;
+            s.z_max_mm = r_max;
+            s.y_max_mm = r_max;
+        } else if z_min_mm_in.is_some() || z_max_mm_in.is_some() {
+            let min_mm = z_min_mm_in.unwrap_or(s.z_min_mm).max(0.0);
             let mut max_mm = z_max_mm_in.unwrap_or(s.z_max_mm);
             if max_mm <= min_mm {
                 max_mm = min_mm + 1.0;
@@ -543,40 +619,18 @@ pub async fn api_set_limits(
             s.y_min_mm = r_min;
             s.z_max_mm = r_max;
             s.y_max_mm = r_max;
-            let zmin_us = ((PULSE_MIN as f64 + min_mm * s.z_scale).round() as i64)
-                .clamp(0, SYSTEM_PULSE_MAX);
-            let zmax_us = ((PULSE_MIN as f64 + max_mm * s.z_scale).round() as i64)
+            let base_us = if s.z_min == PULSE_MIN && min_mm == 0.0 {
+                PULSE_MIN as f64
+            } else {
+                0.0
+            };
+            let zmin_us = ((base_us + min_mm * s.z_scale).round() as i64).clamp(0, SYSTEM_PULSE_MAX);
+            let zmax_us = ((base_us + max_mm * s.z_scale).round() as i64)
                 .clamp(zmin_us + 1, SYSTEM_PULSE_MAX);
             s.z_min = zmin_us;
             s.y_min = zmin_us;
             s.z_max = zmax_us;
             s.y_max = zmax_us;
-        } else {
-            let mut changed_us = false;
-            if let Some(zmin) = parse_f64(data.get("z_min").or_else(|| data.get("y_min"))) {
-                let v = (zmin.round() as i64).clamp(0, SYSTEM_PULSE_MAX);
-                s.z_min = v;
-                s.y_min = v;
-                changed_us = true;
-            }
-            if let Some(zmax) = parse_f64(data.get("z_max").or_else(|| data.get("y_max"))) {
-                let v = (zmax.round() as i64).clamp(s.z_min + 1, SYSTEM_PULSE_MAX);
-                s.z_max = v;
-                s.y_max = v;
-                changed_us = true;
-            }
-            if changed_us {
-                let r_min =
-                    (((s.z_min - PULSE_MIN).max(0) as f64 / s.z_scale.max(0.001)) * 10.0).round()
-                        / 10.0;
-                let r_max = ((r_min + (s.z_max - s.z_min) as f64 / s.z_scale.max(0.001)) * 10.0)
-                    .round()
-                    / 10.0;
-                s.z_min_mm = r_min;
-                s.y_min_mm = r_min;
-                s.z_max_mm = r_max;
-                s.y_max_mm = r_max;
-            }
         }
 
         let clamped_z = ctx
@@ -601,27 +655,29 @@ pub async fn api_set_limits(
         }
 
         if let Some(spd) = parse_f64(data.get("x_max_speed")) {
-            s.x_max_speed = spd;
+            s.x_max_speed = spd.clamp(100.0, 100000.0);
         }
         if let Some(acc) = parse_f64(data.get("x_accel_steps")) {
-            s.x_accel_steps = acc;
+            s.x_accel_steps = acc.clamp(1.0, 5000.0);
         }
         ctx.x_stepper.set_speed_params(s.x_max_speed, s.x_accel_steps);
 
         if let Some(spd) = parse_f64(data.get("z_max_speed").or_else(|| data.get("y_max_speed"))) {
-            s.z_max_speed = spd;
-            s.y_max_speed = spd;
+            let clamped_spd = spd.clamp(100.0, 100000.0);
+            s.z_max_speed = clamped_spd;
+            s.y_max_speed = clamped_spd;
         }
         if let Some(acc) =
             parse_f64(data.get("z_accel_steps").or_else(|| data.get("y_accel_steps")))
         {
-            s.z_accel_steps = acc;
-            s.y_accel_steps = acc;
+            let clamped_acc = acc.clamp(1.0, 5000.0);
+            s.z_accel_steps = clamped_acc;
+            s.y_accel_steps = clamped_acc;
         }
         ctx.z_stepper.set_speed_params(s.z_max_speed, s.z_accel_steps);
 
         if let Some(hspd) = parse_f64(data.get("homing_speed_hz")) {
-            s.homing_speed_hz = hspd.clamp(100.0, 2000.0);
+            s.homing_speed_hz = hspd.clamp(100.0, 25000.0);
         }
 
         if data.get("x_scale").is_some() && x_min_mm_in.is_none() && x_max_mm_in.is_none() {
@@ -733,8 +789,8 @@ pub async fn api_macro_run(
     let action = data.get("action").and_then(|v| v.as_str()).unwrap_or("");
     match action {
         "start" => {
-            if ctx.macro_running.load(Ordering::Relaxed) {
-                return Json(json!({ "ok": false, "msg": "巨集或積木程式已在運行中" }));
+            if let Some(reason) = ctx.is_motion_busy() {
+                return Json(json!({ "ok": false, "msg": reason }));
             }
             let direct = data
                 .get("commands")
@@ -1354,12 +1410,30 @@ pub async fn api_update_pull(
     let _ = check_and_refresh_token(&ctx, token);
 
     let repo_dir = find_git_repo_dir(&ctx.base_dir);
-    ctx.add_history("系統自動更新：開始執行 git fetch + reset --hard 與編譯檢查", "warn");
+    ctx.add_history("系統自動更新：開始執行 git fetch + 差異檢查", "warn");
+    ctx.emit_ws(
+        "update_progress",
+        json!({ "stage": "fetching", "pct": 20, "msg": "正在從 GitHub 抓取最新版本..." }),
+    );
 
     let fetch = Command::new("git")
         .args(["fetch", "origin", "main"])
         .current_dir(&repo_dir)
         .output();
+
+    // 檢查是否有 .rs 或 Cargo.toml 變更，決定是否需要重新編譯 Rust 二進位檔
+    let diff_files = Command::new("git")
+        .args(["diff", "--name-only", "HEAD..origin/main"])
+        .current_dir(&repo_dir)
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    let needs_rust_compile = diff_files.lines().any(|line| {
+        let l = line.trim();
+        l.ends_with(".rs") || l.ends_with("Cargo.toml") || l.ends_with("Cargo.lock")
+    });
+
     let pull = Command::new("git")
         .args(["reset", "--hard", "origin/main"])
         .current_dir(&repo_dir)
@@ -1379,14 +1453,28 @@ pub async fn api_update_pull(
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_else(|| "latest".to_string());
 
-        // 若 Cargo.toml 存在則自動執行 cargo build --release
-        let crate_dir = ctx.base_dir.clone();
-        let _ = Command::new("cargo")
-            .args(["build", "--release"])
-            .current_dir(&crate_dir)
-            .output();
+        if needs_rust_compile {
+            ctx.emit_ws(
+                "update_progress",
+                json!({ "stage": "compiling", "pct": 55, "msg": "偵測到 Rust 核心變更，正在執行 cargo build --release..." }),
+            );
+            let crate_dir = ctx.base_dir.clone();
+            let _ = Command::new("cargo")
+                .args(["build", "--release"])
+                .current_dir(&crate_dir)
+                .output();
+        } else {
+            ctx.emit_ws(
+                "update_progress",
+                json!({ "stage": "fast_update", "pct": 75, "msg": "前端/腳本資源快速熱更新完成（免重編譯 Rust）" }),
+            );
+        }
 
         ctx.add_history(format!("系統更新成功：{}", new_sha), "success");
+        ctx.emit_ws(
+            "update_progress",
+            json!({ "stage": "restarting", "pct": 95, "msg": format!("更新完成 ({})，正在重啟服務...", new_sha) }),
+        );
 
         #[cfg(unix)]
         if restart {
@@ -1398,14 +1486,22 @@ pub async fn api_update_pull(
                 .map(|s| s.password.clone())
                 .unwrap_or_default();
             thread::spawn(move || {
-                thread::sleep(Duration::from_millis(1500));
-                if let Ok(mut child) = Command::new("sudo")
-                    .args(["-S", "systemctl", "restart", "servo-control"])
-                    .stdin(Stdio::piped())
-                    .spawn()
-                {
-                    if let Some(mut stdin) = child.stdin.take() {
-                        let _ = writeln!(stdin, "{}", user_pwd);
+                thread::sleep(Duration::from_millis(1200));
+                // 優先使用 sudo -n (NOPASSWD sudoers)，若失敗再退回密碼輸入
+                let nopass_ok = Command::new("sudo")
+                    .args(["-n", "systemctl", "restart", "servo-control"])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !nopass_ok {
+                    if let Ok(mut child) = Command::new("sudo")
+                        .args(["-S", "systemctl", "restart", "servo-control"])
+                        .stdin(Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(mut stdin) = child.stdin.take() {
+                            let _ = writeln!(stdin, "{}", user_pwd);
+                        }
                     }
                 }
             });
@@ -1414,6 +1510,7 @@ pub async fn api_update_pull(
                 Json(json!({
                     "ok": true,
                     "sha": new_sha,
+                    "compiled": needs_rust_compile,
                     "output": output,
                     "msg": format!("更新完成！正在重啟 Rust 服務... ({})", new_sha)
                 })),
@@ -1426,6 +1523,7 @@ pub async fn api_update_pull(
             Json(json!({
                 "ok": true,
                 "sha": new_sha,
+                "compiled": needs_rust_compile,
                 "output": output,
                 "msg": format!("更新完成！({}) 請手動重啟服務生效。", new_sha)
             })),

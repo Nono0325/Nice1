@@ -12,9 +12,9 @@ use tokio::sync::broadcast;
 use crate::gpio::{HardwareGpio, StepperMotor};
 
 pub const PWM_FREQ: f64 = 50.0;
-pub const PULSE_MIN: i64 = 500;
+pub const PULSE_MIN: i64 = 0;
 pub const PULSE_MAX: i64 = 2500;
-pub const PULSE_CENTER: i64 = 1500;
+pub const PULSE_CENTER: i64 = 1250;
 pub const SYSTEM_PULSE_MAX: i64 = 200_000;
 pub const MAX_HISTORY: usize = 60;
 
@@ -157,6 +157,8 @@ pub struct SystemState {
     pub y_sync: bool,
     pub z_sync: bool,
     pub is_homing: bool,
+    pub x_homed: bool,
+    pub z_homed: bool,
 
     pub continuous_mode: bool,
     pub cycle_count: u64,
@@ -239,17 +241,19 @@ impl SystemState {
             x_scale: 10.0,
             z_scale: 10.0,
             y_scale: 10.0,
-            x_max_speed: 2000.0,
-            x_accel_steps: 100.0,
-            z_max_speed: 2000.0,
-            z_accel_steps: 100.0,
-            y_max_speed: 2000.0,
-            y_accel_steps: 100.0,
-            homing_speed_hz: 400.0,
+            x_max_speed: 8000.0,
+            x_accel_steps: 50.0,
+            z_max_speed: 8000.0,
+            z_accel_steps: 50.0,
+            y_max_speed: 8000.0,
+            y_accel_steps: 50.0,
+            homing_speed_hz: 2500.0,
             motor_locked: true,
             y_sync: true,
             z_sync: true,
             is_homing: false,
+            x_homed: false,
+            z_homed: false,
             continuous_mode: false,
             cycle_count: 0,
             cycle_target: 0,
@@ -330,6 +334,7 @@ pub struct AppContext {
 
     pub error_buffer: Mutex<VecDeque<ErrorLogEntry>>,
     pub error_seq: std::sync::atomic::AtomicU64,
+    pub error_dirty: AtomicBool,
 
     pub homing_lock: Mutex<()>,
     pub homing_abort: AtomicBool,
@@ -368,6 +373,7 @@ impl AppContext {
             history_dirty: AtomicBool::new(false),
             error_buffer: Mutex::new(VecDeque::with_capacity(500)),
             error_seq: std::sync::atomic::AtomicU64::new(1),
+            error_dirty: AtomicBool::new(false),
             homing_lock: Mutex::new(()),
             homing_abort: AtomicBool::new(false),
             macro_running: AtomicBool::new(false),
@@ -470,9 +476,27 @@ impl AppContext {
             }
             buf.push_back(entry.clone());
         }
-        self.save_errors_to_disk();
+        self.error_dirty.store(true, Ordering::Relaxed);
+        if entry.level == "ERROR" || entry.level == "CRITICAL" {
+            self.save_errors_to_disk();
+        }
         self.emit_ws("new_error", serde_json::to_value(&entry).unwrap_or(Value::Null));
         entry
+    }
+
+    pub fn is_motion_busy(&self) -> Option<&'static str> {
+        let s = self.state.read().unwrap();
+        if s.is_homing {
+            return Some("目前正在執行馬達歸零程序，請等待歸零完成");
+        }
+        if s.pickup_active {
+            return Some("目前 14 步衝壓搬運自動循環正在運行中，請先停止循環");
+        }
+        drop(s);
+        if self.macro_running.load(Ordering::Relaxed) {
+            return Some("目前積木程式 / G-code 巨集正在執行中，請先停止巨集");
+        }
+        None
     }
 
     pub fn add_history(&self, msg: impl Into<String>, log_type: &str) {
@@ -586,6 +610,7 @@ impl AppContext {
             let buf = self.error_buffer.lock().unwrap();
             buf.iter().cloned().collect()
         };
+        self.error_dirty.store(false, Ordering::Relaxed);
         if let Ok(json_str) = serde_json::to_string_pretty(&data) {
             let _ = fs::write(self.errors_file(), json_str);
         }

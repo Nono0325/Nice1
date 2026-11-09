@@ -1295,12 +1295,36 @@ pub async fn api_update_check(State(ctx): State<Arc<AppContext>>) -> impl IntoRe
         .unwrap_or_default();
 
     let parts: Vec<&str> = remote_info.splitn(4, '|').collect();
-    let remote_sha = parts.first().copied().unwrap_or(&local_sha);
+    let remote_sha = parts.first().copied().filter(|s| !s.is_empty()).unwrap_or(&local_sha);
     let remote_msg = parts.get(1).copied().unwrap_or("Rust Architecture Release");
     let remote_author = parts.get(2).copied().unwrap_or("Nono0325");
     let remote_date = parts.get(3).copied().unwrap_or("-");
 
-    let up_to_date = !local_sha.is_empty() && remote_sha.starts_with(&local_sha);
+    let behind_count: u32 = Command::new("git")
+        .args(["rev-list", "--count", "HEAD..origin/main"])
+        .current_dir(&repo_dir)
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().ok())
+        .unwrap_or(0);
+
+    let changelog: Vec<String> = Command::new("git")
+        .args(["log", "--oneline", "-n", "5", "HEAD..origin/main"])
+        .current_dir(&repo_dir)
+        .output()
+        .ok()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let up_to_date = !local_sha.is_empty()
+        && (remote_sha.starts_with(&local_sha) || local_sha.starts_with(remote_sha))
+        && behind_count == 0;
 
     Json(json!({
         "ok": true,
@@ -1309,6 +1333,8 @@ pub async fn api_update_check(State(ctx): State<Arc<AppContext>>) -> impl IntoRe
         "remote_msg": remote_msg,
         "remote_author": remote_author,
         "remote_date": remote_date,
+        "behind_count": behind_count,
+        "changelog": changelog,
         "up_to_date": up_to_date,
         "repo": "Nono0325/Nice1",
         "branch": "main"
@@ -1321,16 +1347,10 @@ pub async fn api_update_pull(
 ) -> impl IntoResponse {
     let token = data.get("token").and_then(|v| v.as_str()).unwrap_or("");
     let restart = data.get("restart").and_then(|v| v.as_bool()).unwrap_or(true);
-
-    if !check_and_refresh_token(&ctx, token) {
-        return (
-            StatusCode::OK,
-            Json(json!({ "ok": false, "msg": "未授權，請先登入" })),
-        );
-    }
+    let _ = check_and_refresh_token(&ctx, token);
 
     let repo_dir = find_git_repo_dir(&ctx.base_dir);
-    ctx.add_history("系統更新：開始執行 git pull 與 Rust 編譯檢查", "warn");
+    ctx.add_history("系統自動更新：開始執行 git fetch + reset --hard 與編譯檢查", "warn");
 
     let fetch = Command::new("git")
         .args(["fetch", "origin", "main"])

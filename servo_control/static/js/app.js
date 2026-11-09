@@ -1274,6 +1274,7 @@ async function siteLogin(e) {
     if (logoutBtn) logoutBtn.style.display = 'inline-block';
     toast('🔓 登入成功！', 'success');
     addLog('全站登入成功', 'success');
+    setTimeout(() => checkUpdate(true), 600);
   } else {
     if (errEl) errEl.textContent = r.msg || '密碼錯誤，請重試';
     if (pwdEl) { pwdEl.value = ''; pwdEl.focus(); }
@@ -2627,28 +2628,114 @@ function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// ── GitHub 系統更新 ───────────────────────────────────────────────
-async function checkUpdate() {
-  const btn     = document.getElementById('btnCheckUpdate');
-  const pullBtn = document.getElementById('btnPullUpdate');
-  const badge   = document.getElementById('updateStatusBadge');
+// ── GitHub 自動檢查版本與彈窗一鍵自動更新 ──────────────────────────
+let lastUpdateData = null;
+let dismissedUpdateSha = sessionStorage.getItem('dismissedUpdateSha') || '';
+let autoUpdateCheckEnabled = localStorage.getItem('autoUpdateCheckEnabled') !== 'false';
+let autoUpdateTimer = null;
+let isUpdatingNow = false;
+
+function toggleAutoUpdateCheck(enabled) {
+  autoUpdateCheckEnabled = !!enabled;
+  localStorage.setItem('autoUpdateCheckEnabled', autoUpdateCheckEnabled ? 'true' : 'false');
+  toast(autoUpdateCheckEnabled ? '已開啟自動檢查 GitHub 新版本提醒' : '已關閉自動版本提醒', 'info');
+  if (autoUpdateCheckEnabled) {
+    checkUpdate(true);
+  }
+}
+
+function showUpdateModal(data) {
+  if (!data) return;
+  const modal = document.getElementById('githubUpdateModal');
+  if (!modal) return;
+
+  const localEl  = document.getElementById('updateModalLocalSha');
+  const remoteEl = document.getElementById('updateModalRemoteSha');
+  const msgEl    = document.getElementById('updateModalMsg');
+  const metaEl   = document.getElementById('updateModalMeta');
+  const behindEl = document.getElementById('updateModalBehindBadge');
+  const logWrap  = document.getElementById('updateModalChangelogWrap');
+  const logEl    = document.getElementById('updateModalChangelog');
+  const progWrap = document.getElementById('updateModalProgressWrap');
+  const outEl    = document.getElementById('updateModalOutput');
+  const btnNow   = document.getElementById('btnModalUpdateNow');
+  const btnDim   = document.getElementById('btnModalDismiss');
+
+  if (localEl)  localEl.textContent  = data.local_sha || '-';
+  if (remoteEl) remoteEl.textContent = data.remote_sha || '-';
+  if (msgEl)    msgEl.textContent    = `💬 ${data.remote_msg || '發現新版本更新'}`;
+  if (metaEl)   metaEl.textContent   = `👤 ${data.remote_author || 'GitHub'} · 📅 ${data.remote_date || '-'} · 🌿 ${data.branch || 'main'}`;
+  if (behindEl) {
+    const cnt = data.behind_count || 0;
+    behindEl.textContent = cnt > 0 ? `🆙 落後 ${cnt} 個更新` : '🆙 新版本可用';
+  }
+
+  if (logWrap && logEl) {
+    if (Array.isArray(data.changelog) && data.changelog.length > 0) {
+      logWrap.style.display = 'block';
+      logEl.innerHTML = data.changelog.map(line => `<div>• ${escapeHtml(line)}</div>`).join('');
+    } else {
+      logWrap.style.display = 'none';
+      logEl.innerHTML = '';
+    }
+  }
+
+  if (!isUpdatingNow) {
+    if (progWrap) progWrap.style.display = 'none';
+    if (outEl) { outEl.style.display = 'none'; outEl.textContent = ''; }
+    if (btnNow) { btnNow.disabled = false; btnNow.textContent = '🚀 立即自動更新'; }
+    if (btnDim) { btnDim.disabled = false; btnDim.style.display = 'inline-block'; }
+  }
+
+  modal.style.display = 'flex';
+}
+
+function dismissUpdateModal() {
+  const modal = document.getElementById('githubUpdateModal');
+  if (modal) modal.style.display = 'none';
+  if (lastUpdateData && lastUpdateData.remote_sha) {
+    dismissedUpdateSha = lastUpdateData.remote_sha;
+    sessionStorage.setItem('dismissedUpdateSha', dismissedUpdateSha);
+  }
+}
+
+function openUpdateModalOrCheck() {
+  if (lastUpdateData && !lastUpdateData.up_to_date) {
+    showUpdateModal(lastUpdateData);
+  } else {
+    checkUpdate(false);
+  }
+}
+
+async function checkUpdate(silent = false) {
+  const btn      = document.getElementById('btnCheckUpdate');
+  const pullBtn  = document.getElementById('btnPullUpdate');
+  const badge    = document.getElementById('updateStatusBadge');
   const localEl  = document.getElementById('updateLocalSha');
   const remoteEl = document.getElementById('updateRemoteSha');
   const msgEl    = document.getElementById('updateRemoteMsg');
   const metaEl   = document.getElementById('updateRemoteMeta');
+  const navBadge = document.getElementById('navUpdateBadge');
+  const navText  = document.getElementById('navUpdateBadgeText');
 
-  if (btn) { btn.textContent = '🔍 檢查中...'; btn.disabled = true; }
-  if (badge) { badge.textContent = '連線中'; badge.style.background = 'rgba(59,130,246,0.2)'; badge.style.color = 'var(--accent-cyan)'; }
+  if (!silent) {
+    if (btn) { btn.textContent = '🔍 檢查中...'; btn.disabled = true; }
+    if (badge) { badge.textContent = '連線中'; badge.style.background = 'rgba(59,130,246,0.2)'; badge.style.color = 'var(--accent-cyan)'; }
+  }
 
   try {
-    const r = await fetch('/api/update/check');
+    const r = await fetch('/api/update/check', { cache: 'no-store' });
     const data = await r.json();
 
     if (!data.ok) {
-      if (badge) { badge.textContent = '❌ 無法連線'; badge.style.background = 'rgba(239,68,68,0.2)'; badge.style.color = 'var(--accent-red)'; }
-      toast(`無法連線至 GitHub: ${data.msg}`, 'error');
-      return;
+      if (!silent) {
+        if (badge) { badge.textContent = '❌ 無法連線'; badge.style.background = 'rgba(239,68,68,0.2)'; badge.style.color = 'var(--accent-red)'; }
+        toast(`無法連線至 GitHub: ${data.msg}`, 'error');
+      }
+      return null;
     }
+
+    lastUpdateData = data;
 
     if (localEl)  localEl.textContent  = data.local_sha  || '-';
     if (remoteEl) remoteEl.textContent = data.remote_sha || '-';
@@ -2658,55 +2745,157 @@ async function checkUpdate() {
     if (data.up_to_date) {
       if (badge) { badge.textContent = '✅ 已是最新'; badge.style.background = 'rgba(34,197,94,0.2)'; badge.style.color = 'var(--accent-green)'; }
       if (pullBtn) pullBtn.disabled = true;
-      toast('已是最新版本！', 'success');
+      if (navBadge) navBadge.style.display = 'none';
+      if (!silent) {
+        toast(`目前已是最新版本 (${data.local_sha})！`, 'success');
+      }
     } else {
       if (badge) { badge.textContent = '🆙 有新版本'; badge.style.background = 'rgba(251,191,36,0.2)'; badge.style.color = 'var(--accent-amber)'; }
       if (pullBtn) pullBtn.disabled = false;
-      toast(`有新版本可更新！(${data.local_sha} → ${data.remote_sha})`, 'warn');
+      if (navBadge) {
+        navBadge.style.display = 'inline-flex';
+        if (navText) navText.textContent = `有新版本 (${data.remote_sha}) 點擊更新`;
+      }
+
+      // 若是手動點擊檢查、或是背景自動檢查發現尚未忽略的新版本，立即跳出版本更新提示彈窗！
+      if (!silent || (autoUpdateCheckEnabled && dismissedUpdateSha !== data.remote_sha)) {
+        showUpdateModal(data);
+        toast(`🚀 發現 GitHub 新版本 (${data.local_sha} → ${data.remote_sha})！`, 'warn');
+      }
     }
+    return data;
   } catch (e) {
-    toast(`檢查失敗: ${e.message}`, 'error');
+    if (!silent) toast(`檢查失敗: ${e.message}`, 'error');
+    return null;
   } finally {
-    if (btn) { btn.textContent = '🔍 檢查更新'; btn.disabled = false; }
+    if (!silent && btn) { btn.textContent = '🔍 立即檢查更新'; btn.disabled = false; }
   }
 }
 
-async function pullUpdate() {
-  if (!siteToken) { toast('請先登入系統', 'error'); return; }
-  if (!confirm('⚠️ 確定要更新系統嗎？\n\n本地未提交的修改將被覆蓋，更新後服務可能短暫中斷。')) return;
+async function triggerAutoUpdate() {
+  return pullUpdate(true);
+}
 
-  const btn    = document.getElementById('btnPullUpdate');
-  const outEl  = document.getElementById('updateOutputPanel');
-  const badge  = document.getElementById('updateStatusBadge');
+async function pullUpdate(fromModal = false) {
+  if (isUpdatingNow) return;
+  isUpdatingNow = true;
+
+  const btn       = document.getElementById('btnPullUpdate');
+  const outEl     = document.getElementById('updateOutputPanel');
+  const badge     = document.getElementById('updateStatusBadge');
+  const navBadge  = document.getElementById('navUpdateBadge');
   const autoRestart = document.getElementById('updateAutoRestart')?.checked ?? true;
 
-  if (btn) { btn.textContent = '⬇️ 更新中...'; btn.disabled = true; }
-  if (badge) { badge.textContent = '⏳ 更新中'; badge.style.background = 'rgba(59,130,246,0.2)'; badge.style.color = 'var(--accent-cyan)'; }
-  if (outEl) { outEl.style.display = 'block'; outEl.textContent = '⏳ 正在執行 git fetch + reset --hard，請稍候...\n'; }
+  // 彈窗元件
+  const modal    = document.getElementById('githubUpdateModal');
+  const progWrap = document.getElementById('updateModalProgressWrap');
+  const progBar  = document.getElementById('updateModalProgressBar');
+  const pctText  = document.getElementById('updateModalPctText');
+  const statText = document.getElementById('updateModalStatusText');
+  const modalOut = document.getElementById('updateModalOutput');
+  const btnNow   = document.getElementById('btnModalUpdateNow');
+  const btnDim   = document.getElementById('btnModalDismiss');
 
-  toast('開始更新，請稍候...', 'warn');
+  if (btn) { btn.textContent = '⬇️ 自動更新中...'; btn.disabled = true; }
+  if (badge) { badge.textContent = '⏳ 更新中'; badge.style.background = 'rgba(59,130,246,0.2)'; badge.style.color = 'var(--accent-cyan)'; }
+  if (outEl) { outEl.style.display = 'block'; outEl.textContent = '⏳ 正在執行 git fetch + reset --hard 自動更新，請稍候...\n'; }
+
+  // 同步顯示彈窗內進度條
+  if (modal && (fromModal || modal.style.display === 'flex')) {
+    modal.style.display = 'flex';
+  }
+  if (progWrap) progWrap.style.display = 'block';
+  if (progBar)  progBar.style.width = '40%';
+  if (pctText)  pctText.textContent = '40%';
+  if (statText) {
+    statText.textContent = '⏳ 正在從 GitHub 下載並套用最新程式碼...';
+    statText.style.color = 'var(--accent-cyan)';
+  }
+  if (btnNow) { btnNow.disabled = true; btnNow.textContent = '⏳ 自動更新中...'; }
+  if (btnDim) { btnDim.disabled = true; }
+
+  toast('🚀 開始自動更新系統，請稍候...', 'info');
 
   try {
     const r = await apiPost('/api/update/pull', { token: siteToken, restart: autoRestart });
 
     if (outEl) outEl.textContent = r.output || r.msg || '(無輸出)';
+    if (modalOut) {
+      modalOut.style.display = 'block';
+      modalOut.textContent = r.output || r.msg || '(更新完成)';
+    }
 
     if (r.ok) {
+      if (progBar) progBar.style.width = '100%';
+      if (pctText) pctText.textContent = '100%';
+      if (statText) {
+        statText.textContent = `✅ 更新完成 (${r.sha || 'latest'})！正在自動重新載入最新介面...`;
+        statText.style.color = 'var(--accent-green)';
+      }
       if (badge) { badge.textContent = '✅ 更新完成'; badge.style.background = 'rgba(34,197,94,0.2)'; badge.style.color = 'var(--accent-green)'; }
+      if (navBadge) navBadge.style.display = 'none';
+
       const localEl = document.getElementById('updateLocalSha');
+      const modalLocalEl = document.getElementById('updateModalLocalSha');
       if (localEl && r.sha) localEl.textContent = r.sha;
-      toast(r.msg || '更新成功！', 'success');
-      addLog(`系統更新完成 → ${r.sha || ''}`, 'success');
-      if (btn) { btn.textContent = '✅ 已更新'; btn.disabled = true; }
+      if (modalLocalEl && r.sha) modalLocalEl.textContent = r.sha;
+      if (lastUpdateData && r.sha) {
+        lastUpdateData.local_sha = r.sha;
+        lastUpdateData.up_to_date = true;
+        lastUpdateData.behind_count = 0;
+      }
+
+      toast(r.msg || '✅ 系統自動更新成功！', 'success');
+      addLog(`系統自動更新完成 → ${r.sha || ''}`, 'success');
+      if (btn) { btn.textContent = '✅ 已是最新'; btn.disabled = true; }
+      if (btnNow) { btnNow.textContent = '✅ 更新完成！即將重整...'; }
+
+      setTimeout(() => {
+        if (modal) modal.style.display = 'none';
+        window.location.reload();
+      }, 2200);
     } else {
+      if (progBar) progBar.style.width = '100%';
+      if (statText) {
+        statText.textContent = `❌ 更新失敗: ${r.msg || '未知錯誤'}`;
+        statText.style.color = 'var(--accent-red)';
+      }
       if (badge) { badge.textContent = '❌ 更新失敗'; badge.style.background = 'rgba(239,68,68,0.2)'; badge.style.color = 'var(--accent-red)'; }
       toast(`更新失敗: ${r.msg}`, 'error');
-      if (btn) { btn.textContent = '⬇️ 下載並更新'; btn.disabled = false; }
+      if (btn) { btn.textContent = '⬇️ 立即自動更新'; btn.disabled = false; }
+      if (btnNow) { btnNow.textContent = '🔄 重試自動更新'; btnNow.disabled = false; }
+      if (btnDim) { btnDim.disabled = false; }
     }
   } catch (e) {
+    if (statText) {
+      statText.textContent = `❌ 更新例外: ${e.message}`;
+      statText.style.color = 'var(--accent-red)';
+    }
     toast(`更新例外: ${e.message}`, 'error');
-    if (btn) { btn.textContent = '⬇️ 下載並更新'; btn.disabled = false; }
+    if (btn) { btn.textContent = '⬇️ 立即自動更新'; btn.disabled = false; }
+    if (btnNow) { btnNow.textContent = '🔄 重試自動更新'; btnNow.disabled = false; }
+    if (btnDim) { btnDim.disabled = false; }
+  } finally {
+    isUpdatingNow = false;
   }
+}
+
+function initAutoUpdateChecker() {
+  const toggleEl = document.getElementById('updateAutoCheckToggle');
+  if (toggleEl) toggleEl.checked = autoUpdateCheckEnabled;
+
+  // 啟動後 1.5 秒自動檢查一次 GitHub 版本
+  setTimeout(() => {
+    if (autoUpdateCheckEnabled) checkUpdate(true);
+  }, 1500);
+
+  // 每 60 秒背景自動巡檢 GitHub 是否有新版本提交
+  if (autoUpdateTimer) clearInterval(autoUpdateTimer);
+  autoUpdateTimer = setInterval(() => {
+    if (autoUpdateCheckEnabled && !isUpdatingNow) {
+      checkUpdate(true);
+    }
+  }, 60000);
 }
 
 
@@ -2817,5 +3006,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 全站認證檢查（最後執行，可能會顯示登入遮罩）
   checkSiteAuthOnLoad();
+
+  // 啟動 GitHub 自動版本巡檢與彈窗提示器
+  initAutoUpdateChecker();
 });
 

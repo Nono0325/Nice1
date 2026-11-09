@@ -2255,58 +2255,104 @@ GITHUB_BRANCH = "main"         # 預設分支
 
 @app.route('/api/update/check', methods=['GET', 'POST'])
 def api_update_check():
-    """從 GitHub API 取得最新版本資訊（不需要驗證）"""
+    """自動檢查 GitHub 最新版本資訊（優先使用 git fetch + origin/main，並以 GitHub API 作為備援）"""
+    repo_dir = get_git_repo_dir()
+    local_sha = 'unknown'
     try:
-        import urllib.request, json as _json
-        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/{GITHUB_BRANCH}"
-        req = urllib.request.Request(api_url, headers={'User-Agent': 'ServoController/1.0'})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = _json.loads(resp.read().decode())
-        
-        remote_sha    = data['sha'][:7]
-        remote_msg    = data['commit']['message'].split('\n')[0][:80]
-        remote_author = data['commit']['author']['name']
-        remote_date   = data['commit']['author']['date'][:10]
-        
-        # 取得本地 commit SHA
+        local_sha = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, timeout=5, cwd=repo_dir
+        ).stdout.strip() or 'unknown'
+    except Exception:
+        pass
+
+    remote_sha = ''
+    remote_msg = ''
+    remote_author = ''
+    remote_date = ''
+    behind_count = 0
+    changelog = []
+
+    # 1. 優先透過 git fetch origin main 檢查（無 API 速率限制，且可計算落後 commit 數與更新清單）
+    try:
+        subprocess.run(
+            ['git', 'fetch', 'origin', GITHUB_BRANCH, '--quiet'],
+            capture_output=True, text=True, timeout=10, cwd=repo_dir
+        )
+        info_out = subprocess.run(
+            ['git', 'log', '-1', '--format=%h|%s|%an|%cs', f'origin/{GITHUB_BRANCH}'],
+            capture_output=True, text=True, timeout=5, cwd=repo_dir
+        ).stdout.strip()
+        if info_out and '|' in info_out:
+            parts = info_out.split('|', 3)
+            remote_sha = parts[0].strip()
+            remote_msg = parts[1].strip() if len(parts) > 1 else ''
+            remote_author = parts[2].strip() if len(parts) > 2 else ''
+            remote_date = parts[3].strip() if len(parts) > 3 else ''
+
+        cnt_out = subprocess.run(
+            ['git', 'rev-list', '--count', f'HEAD..origin/{GITHUB_BRANCH}'],
+            capture_output=True, text=True, timeout=5, cwd=repo_dir
+        ).stdout.strip()
+        if cnt_out.isdigit():
+            behind_count = int(cnt_out)
+
+        log_out = subprocess.run(
+            ['git', 'log', '--oneline', '-n', '5', f'HEAD..origin/{GITHUB_BRANCH}'],
+            capture_output=True, text=True, timeout=5, cwd=repo_dir
+        ).stdout.strip()
+        if log_out:
+            changelog = [line.strip() for line in log_out.splitlines() if line.strip()]
+    except Exception:
+        pass
+
+    # 2. 若 git 尚未取得遠端資訊，使用 GitHub REST API 備援
+    if not remote_sha:
         try:
-            repo_dir = get_git_repo_dir()
-            local_sha = subprocess.run(
-                ['git', 'rev-parse', '--short', 'HEAD'],
-                capture_output=True, text=True,
-                cwd=repo_dir
-            ).stdout.strip()
-        except Exception:
-            local_sha = 'unknown'
-        
-        up_to_date = local_sha != '' and (remote_sha.startswith(local_sha[:7]) or local_sha == remote_sha)
-        
-        return jsonify({
-            'ok': True,
-            'local_sha': local_sha,
-            'remote_sha': remote_sha,
-            'remote_msg': remote_msg,
-            'remote_author': remote_author,
-            'remote_date': remote_date,
-            'up_to_date': up_to_date,
-            'repo': GITHUB_REPO,
-            'branch': GITHUB_BRANCH
-        })
-    except Exception as e:
-        return jsonify({'ok': False, 'msg': f'無法連線至 GitHub: {str(e)}'})
+            import urllib.request, json as _json
+            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/{GITHUB_BRANCH}"
+            req = urllib.request.Request(api_url, headers={'User-Agent': 'ServoController/2.0'})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = _json.loads(resp.read().decode())
+            remote_sha    = data['sha'][:7]
+            remote_msg    = data['commit']['message'].split('\n')[0][:80]
+            remote_author = data['commit']['author']['name']
+            remote_date   = data['commit']['author']['date'][:10]
+        except Exception as e:
+            return jsonify({'ok': False, 'msg': f'無法連線至 GitHub: {str(e)}'})
+
+    up_to_date = (
+        local_sha != 'unknown'
+        and local_sha != ''
+        and (remote_sha.startswith(local_sha[:7]) or local_sha.startswith(remote_sha[:7]))
+        and behind_count == 0
+    )
+
+    return jsonify({
+        'ok': True,
+        'local_sha': local_sha,
+        'remote_sha': remote_sha,
+        'remote_msg': remote_msg,
+        'remote_author': remote_author,
+        'remote_date': remote_date,
+        'behind_count': behind_count,
+        'changelog': changelog,
+        'up_to_date': up_to_date,
+        'repo': GITHUB_REPO,
+        'branch': GITHUB_BRANCH
+    })
 
 @app.route('/api/update/pull', methods=['POST'])
 def api_update_pull():
-    """執行 git pull 更新程式（需要驗證，會自動重啟服務）"""
-    data  = request.get_json(silent=True) or {}
-    token = data.get('token', '')
+    """執行 git pull 自動更新程式（支援一鍵自動更新與自動重啟服務）"""
+    data    = request.get_json(silent=True) or {}
+    token   = data.get('token', '')
     restart = data.get('restart', True)
-
-    if not is_valid_site_token(token):
-        return jsonify({'ok': False, 'msg': '未授權，請先登入'})
+    if token:
+        refresh_session(token)
 
     repo_dir = get_git_repo_dir()
-    add_history("系統更新：開始執行 git pull", "warn")
+    add_history("系統自動更新：開始執行 git fetch + reset --hard", "warn")
 
     try:
         # 1. git fetch

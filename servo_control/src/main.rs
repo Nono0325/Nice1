@@ -54,46 +54,29 @@ fn spawn_broadcast_loop(ctx: Arc<AppContext>) {
             let (x_pulse, z_pulse, is_pi, sys_run) = {
                 let mut s = ctx.state.write().unwrap();
 
-                let x_min_f = s.x_min as f64;
-                let x_max_f = s.x_max as f64;
-                let z_min_f = s.z_min as f64;
-                let z_max_f = s.z_max as f64;
+                let x_min_mm = s.x_min_mm;
+                let x_max_mm = s.x_max_mm.max(x_min_mm + 1.0);
+                let z_min_mm = s.z_min_mm;
+                let z_max_mm = s.z_max_mm.max(z_min_mm + 1.0);
 
-                let x_clamped = x_pos.clamp(x_min_f, x_max_f);
-                let z_clamped = z_pos.clamp(z_min_f, z_max_f);
+                let x_clamped_mm = x_pos.clamp(x_min_mm, x_max_mm);
+                let z_clamped_mm = z_pos.clamp(z_min_mm, z_max_mm);
 
-                s.x_max_mm = ((s.x_min_mm + (x_max_f - x_min_f) / s.x_scale.max(0.001)) * 10.0)
-                    .round()
-                    / 10.0;
-                s.z_max_mm = ((s.z_min_mm + (z_max_f - z_min_f) / s.z_scale.max(0.001)) * 10.0)
-                    .round()
-                    / 10.0;
-                s.y_min_mm = s.z_min_mm;
-                s.y_max_mm = s.z_max_mm;
+                s.x_mm = (x_clamped_mm * 10.0).round() / 10.0;
+                s.x_pct = (((x_clamped_mm - x_min_mm) / (x_max_mm - x_min_mm)) * 100.0).clamp(0.0, 100.0);
+                s.x_pulse = (x_clamped_mm * s.x_steps_per_mm).round() as i64;
 
-                s.x_pulse = x_clamped.round() as i64;
-                s.x_pct = (((x_clamped - x_min_f) / (x_max_f - x_min_f).max(1.0)) * 100.0)
-                    .clamp(0.0, 100.0);
-                s.x_mm = (((s.x_min_mm + (x_clamped - x_min_f) / s.x_scale.max(0.001)) * 10.0)
-                    .round()
-                    / 10.0)
-                    .clamp(s.x_min_mm, s.x_max_mm);
-
-                s.z_pulse = z_clamped.round() as i64;
-                s.z_pct = (((z_clamped - z_min_f) / (z_max_f - z_min_f).max(1.0)) * 100.0)
-                    .clamp(0.0, 100.0);
-                s.z_mm = (((s.z_min_mm + (z_clamped - z_min_f) / s.z_scale.max(0.001)) * 10.0)
-                    .round()
-                    / 10.0)
-                    .clamp(s.z_min_mm, s.z_max_mm);
+                s.z_mm = (z_clamped_mm * 10.0).round() / 10.0;
+                s.z_pct = (((z_clamped_mm - z_min_mm) / (z_max_mm - z_min_mm)) * 100.0).clamp(0.0, 100.0);
+                s.z_pulse = (z_clamped_mm * s.z_steps_per_mm).round() as i64;
 
                 // 若原點霍爾/限位處於觸發狀態或已完成歸零，強制定錨於 0 原點坐標
-                if (s.lim_x_a || s.lim_left) && x_clamped <= x_min_f + 15.0 {
+                if (s.lim_x_a || s.lim_left) && x_clamped_mm <= x_min_mm + 1.0 {
                     s.x_pulse = 0;
                     s.x_mm = 0.0;
                     s.x_pct = 0.0;
                 }
-                if (s.lim_z_d || s.lim_up) && z_clamped <= z_min_f + 15.0 {
+                if (s.lim_z_d || s.lim_up) && z_clamped_mm <= z_min_mm + 1.0 {
                     s.z_pulse = 0;
                     s.z_mm = 0.0;
                     s.z_pct = 0.0;

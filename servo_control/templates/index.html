@@ -854,6 +854,10 @@
               <input type="number" id="xAccelStepsInput" value="50" min="1" max="5000" step="10" style="width:100%">
             </div>
             <div>
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">步進傳動比 (Steps per mm，57BYG 1600細分/5mm導程 = 320)</label>
+              <input type="number" id="xStepsPerMmInput" value="320" min="0.1" max="50000" step="any" style="width:100%">
+            </div>
+            <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">物理行程比例 (µs per mm)</label>
               <input type="number" id="xScaleInput" value="10.0" min="0.001" max="10000" step="any" style="width:100%">
               <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 20，則 1mm = 20µs。</div>
@@ -872,6 +876,10 @@
               <input type="number" id="yAccelStepsInput" value="50" min="1" max="5000" step="10" style="width:100%">
             </div>
             <div>
+              <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">步進傳動比 (Steps per mm，57BYG 1600細分/5mm導程 = 320)</label>
+              <input type="number" id="yStepsPerMmInput" value="320" min="0.1" max="50000" step="any" style="width:100%">
+            </div>
+            <div>
               <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">物理行程比例 (µs per mm)</label>
               <input type="number" id="yScaleInput" value="10.0" min="0.001" max="10000" step="any" style="width:100%">
               <div style="font-size:12px;color:var(--text-dim);margin-top:4px">💡 每 1 mm 需多少 µs 脈衝。若設為 1，則 1mm = 1µs；若設為 20，則 1mm = 20µs。</div>
@@ -880,14 +888,19 @@
         </div>
       </div>
       <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-        <h4 style="color:var(--accent-amber);margin-bottom:12px;font-size:15px">⚡ 閉迴路步進歸零頻率設定</h4>
+        <h4 style="color:var(--accent-amber);margin-bottom:12px;font-size:15px">⚡ 閉迴路步進兩段式精密歸零設定</h4>
         <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <div style="flex:1;min-width:240px">
-            <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">歸零逼近頻率 (Homing Speed Hz，支援 100 ~ 25,000 Hz)</label>
-            <input type="number" id="homingSpeedInput" value="2500" min="100" max="25000" step="100" style="width:100%">
+          <div style="flex:1;min-width:200px">
+            <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">第一段粗搜頻率 (Homing Speed Hz)</label>
+            <input type="number" id="homingSpeedInput" value="2000" min="100" max="25000" step="100" style="width:100%">
           </div>
-          <div style="flex:1;min-width:240px;font-size:13px;color:var(--text-dim);line-height:1.5">
-            💡 57BYG 閉迴路步進驅動器高細分下建議設定為 1,500 ~ 6,000 Hz，馬達將快速平穩尋原點並在觸發接近開關後回退校準。
+          <div style="flex:1;min-width:200px">
+            <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">第二段安全回退距離 (Retract mm)</label>
+            <input type="number" id="homingRetractInput" value="3.0" min="0.5" max="50" step="0.5" style="width:100%">
+          </div>
+          <div style="flex:1;min-width:200px">
+            <label style="font-size:13px;color:var(--text-sec);display:block;margin-bottom:6px">第三段慢速精確捕獲頻率 (Latch Hz)</label>
+            <input type="number" id="homingLatchHzInput" value="350" min="50" max="3000" step="50" style="width:100%">
           </div>
         </div>
       </div>

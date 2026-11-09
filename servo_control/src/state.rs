@@ -146,6 +146,17 @@ pub struct SystemState {
     pub z_scale: f64,
     pub y_scale: f64,
 
+    // 57BYG-112 閉迴路步進電機傳動比標準參數 (1600細分 / 5mm導程 = 320 steps/mm)
+    pub x_steps_per_mm: f64,
+    pub z_steps_per_mm: f64,
+    pub y_steps_per_mm: f64,
+    pub x_microsteps: u32,
+    pub z_microsteps: u32,
+    pub x_lead_mm: f64,
+    pub z_lead_mm: f64,
+    pub homing_retract_mm: f64,
+    pub homing_latch_hz: f64,
+
     pub x_max_speed: f64,
     pub x_accel_steps: f64,
     pub z_max_speed: f64,
@@ -243,13 +254,22 @@ impl SystemState {
             x_scale: 10.0,
             z_scale: 10.0,
             y_scale: 10.0,
-            x_max_speed: 8000.0,
-            x_accel_steps: 50.0,
-            z_max_speed: 8000.0,
-            z_accel_steps: 50.0,
-            y_max_speed: 8000.0,
-            y_accel_steps: 50.0,
-            homing_speed_hz: 2500.0,
+            x_steps_per_mm: 320.0,
+            z_steps_per_mm: 320.0,
+            y_steps_per_mm: 320.0,
+            x_microsteps: 1600,
+            z_microsteps: 1600,
+            x_lead_mm: 5.0,
+            z_lead_mm: 5.0,
+            homing_retract_mm: 3.0,
+            homing_latch_hz: 350.0,
+            x_max_speed: 16000.0,
+            x_accel_steps: 600.0,
+            z_max_speed: 16000.0,
+            z_accel_steps: 600.0,
+            y_max_speed: 16000.0,
+            y_accel_steps: 600.0,
+            homing_speed_hz: 2000.0,
             motor_locked: true,
             y_sync: true,
             z_sync: true,
@@ -683,6 +703,21 @@ impl AppContext {
                 if let Some(v) = cfg.get("z_max_mm").and_then(|v| v.as_f64()) { s.z_max_mm = v; s.y_max_mm = v; }
                 if let Some(v) = cfg.get("x_scale").and_then(|v| v.as_f64()) { s.x_scale = v.max(0.001); }
                 if let Some(v) = cfg.get("z_scale").and_then(|v| v.as_f64()) { s.z_scale = v.max(0.001); s.y_scale = s.z_scale; }
+                if let Some(v) = cfg.get("x_steps_per_mm").and_then(|v| v.as_f64()) {
+                    s.x_steps_per_mm = v.max(0.1);
+                    self.x_stepper.set_steps_per_unit(s.x_steps_per_mm);
+                }
+                if let Some(v) = cfg.get("z_steps_per_mm").and_then(|v| v.as_f64()) {
+                    s.z_steps_per_mm = v.max(0.1);
+                    s.y_steps_per_mm = s.z_steps_per_mm;
+                    self.z_stepper.set_steps_per_unit(s.z_steps_per_mm);
+                }
+                if let Some(v) = cfg.get("x_microsteps").and_then(|v| v.as_u64()) { s.x_microsteps = v as u32; }
+                if let Some(v) = cfg.get("z_microsteps").and_then(|v| v.as_u64()) { s.z_microsteps = v as u32; }
+                if let Some(v) = cfg.get("x_lead_mm").and_then(|v| v.as_f64()) { s.x_lead_mm = v.max(0.01); }
+                if let Some(v) = cfg.get("z_lead_mm").and_then(|v| v.as_f64()) { s.z_lead_mm = v.max(0.01); }
+                if let Some(v) = cfg.get("homing_retract_mm").and_then(|v| v.as_f64()) { s.homing_retract_mm = v.max(0.5); }
+                if let Some(v) = cfg.get("homing_latch_hz").and_then(|v| v.as_f64()) { s.homing_latch_hz = v.clamp(50.0, 5000.0); }
                 if let Some(v) = cfg.get("x_max_speed").and_then(|v| v.as_f64()) {
                     s.x_max_speed = v;
                     self.x_stepper.set_speed_params(v, s.x_accel_steps);
@@ -725,6 +760,15 @@ impl AppContext {
             "x_scale": s.x_scale,
             "z_scale": s.z_scale,
             "y_scale": s.y_scale,
+            "x_steps_per_mm": s.x_steps_per_mm,
+            "z_steps_per_mm": s.z_steps_per_mm,
+            "y_steps_per_mm": s.y_steps_per_mm,
+            "x_microsteps": s.x_microsteps,
+            "z_microsteps": s.z_microsteps,
+            "x_lead_mm": s.x_lead_mm,
+            "z_lead_mm": s.z_lead_mm,
+            "homing_retract_mm": s.homing_retract_mm,
+            "homing_latch_hz": s.homing_latch_hz,
             "x_max_speed": s.x_max_speed,
             "x_accel_steps": s.x_accel_steps,
             "z_max_speed": s.z_max_speed,
@@ -787,6 +831,21 @@ impl AppContext {
             "z" | "y" | "y1" | "y2" => {
                 let clamped = pulse_us.clamp(s.z_min as f64, s.z_max as f64);
                 self.z_stepper.set_target(clamped, s.z_min as f64, s.z_max as f64);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn set_axis_pos_mm(&self, axis: &str, pos_mm: f64) {
+        let s = self.state.read().unwrap();
+        match axis.to_lowercase().as_str() {
+            "x" => {
+                let clamped = pos_mm.clamp(s.x_min_mm, s.x_max_mm);
+                self.x_stepper.set_target(clamped, s.x_min_mm, s.x_max_mm);
+            }
+            "z" | "y" | "y1" | "y2" => {
+                let clamped = pos_mm.clamp(s.z_min_mm, s.z_max_mm);
+                self.z_stepper.set_target(clamped, s.z_min_mm, s.z_max_mm);
             }
             _ => {}
         }

@@ -531,13 +531,17 @@ function updateUI() {
       setElValue('yMaxInput', s.z_max !== undefined ? s.z_max : s.y_max);
     }
 
-    setElValue('xMaxSpeedInput', s.x_max_speed || 2000);
-    setElValue('xAccelStepsInput', s.x_accel_steps || 100);
+    setElValue('xMaxSpeedInput', s.x_max_speed || 16000);
+    setElValue('xAccelStepsInput', s.x_accel_steps || 600);
+    setElValue('xStepsPerMmInput', s.x_steps_per_mm || 320);
     setElValue('xScaleInput', s.x_scale || 10);
-    setElValue('yMaxSpeedInput', s.z_max_speed || s.y_max_speed || 2000);
-    setElValue('yAccelStepsInput', s.z_accel_steps || s.y_accel_steps || 100);
+    setElValue('yMaxSpeedInput', s.z_max_speed || s.y_max_speed || 16000);
+    setElValue('yAccelStepsInput', s.z_accel_steps || s.y_accel_steps || 600);
+    setElValue('yStepsPerMmInput', s.z_steps_per_mm || s.y_steps_per_mm || 320);
     setElValue('yScaleInput', s.z_scale || s.y_scale || 10);
-    setElValue('homingSpeedInput', s.homing_speed_hz || 400);
+    setElValue('homingSpeedInput', s.homing_speed_hz || 2000);
+    setElValue('homingRetractInput', s.homing_retract_mm || 3.0);
+    setElValue('homingLatchHzInput', s.homing_latch_hz || 350);
   }
 
   // 馬達鎖定按鈕狀態
@@ -1180,17 +1184,21 @@ function clearSettingsDirty() { settingsDirty = false; }
 async function applyAdvancedLimits() {
   const xMaxSpeed   = parseFloat(document.getElementById('xMaxSpeedInput').value);
   const xAccelSteps = parseFloat(document.getElementById('xAccelStepsInput').value);
+  const xStepsPerMm = parseFloat(document.getElementById('xStepsPerMmInput')?.value || 320);
   const xScale      = parseFloat(document.getElementById('xScaleInput').value);
   const yMaxSpeed   = parseFloat(document.getElementById('yMaxSpeedInput').value);
   const yAccelSteps = parseFloat(document.getElementById('yAccelStepsInput').value);
+  const yStepsPerMm = parseFloat(document.getElementById('yStepsPerMmInput')?.value || 320);
   const yScale      = parseFloat(document.getElementById('yScaleInput').value);
-  const homingSpeed = parseFloat(document.getElementById('homingSpeedInput')?.value || 2500);
+  const homingSpeed = parseFloat(document.getElementById('homingSpeedInput')?.value || 2000);
+  const homingRetract = parseFloat(document.getElementById('homingRetractInput')?.value || 3.0);
+  const homingLatch = parseFloat(document.getElementById('homingLatchHzInput')?.value || 350.0);
 
   const r = await apiPost('/api/set_limits', {
-    x_max_speed: xMaxSpeed, x_accel_steps: xAccelSteps, x_scale: xScale,
-    z_max_speed: yMaxSpeed, z_accel_steps: yAccelSteps, z_scale: yScale,
-    y_max_speed: yMaxSpeed, y_accel_steps: yAccelSteps, y_scale: yScale,
-    homing_speed_hz: homingSpeed
+    x_max_speed: xMaxSpeed, x_accel_steps: xAccelSteps, x_steps_per_mm: xStepsPerMm, x_scale: xScale,
+    z_max_speed: yMaxSpeed, z_accel_steps: yAccelSteps, z_steps_per_mm: yStepsPerMm, z_scale: yScale,
+    y_max_speed: yMaxSpeed, y_accel_steps: yAccelSteps, y_steps_per_mm: yStepsPerMm, y_scale: yScale,
+    homing_speed_hz: homingSpeed, homing_retract_mm: homingRetract, homing_latch_hz: homingLatch
   });
   if (r.ok) {
     if (r.limits) {
@@ -1198,8 +1206,8 @@ async function applyAdvancedLimits() {
     }
     clearSettingsDirty();
     updateUI();
-    toast(`✅ 速度(${xMaxSpeed}/${yMaxSpeed}Hz)、歸零(${homingSpeed}Hz)與物理比例已儲存！`, 'success');
-    addLog(`參數儲存: X速度=${xMaxSpeed}Hz, Z速度=${yMaxSpeed}Hz, 歸零=${homingSpeed}Hz, X比例=${xScale}, Z比例=${yScale}`, 'success');
+    toast(`✅ 傳動比(${xStepsPerMm}步/mm)、速度(${xMaxSpeed}/${yMaxSpeed}Hz)與兩段歸零已儲存！`, 'success');
+    addLog(`參數儲存: X傳動比=${xStepsPerMm}步/mm, Z傳動比=${yStepsPerMm}步/mm, X速度=${xMaxSpeed}Hz, Z速度=${yMaxSpeed}Hz, 兩段歸零=${homingSpeed}/${homingLatch}Hz, 回退=${homingRetract}mm`, 'success');
   }
 }
 
@@ -2963,8 +2971,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 設定頁所有輸入框監聽—標記 dirty，防止 100ms WebSocket 廣播覆蓋使用者正在修改的值
   ['xMinInput','xMaxInput','yMinInput','yMaxInput',
-   'xMaxSpeedInput','xAccelStepsInput','xScaleInput',
-   'yMaxSpeedInput','yAccelStepsInput','yScaleInput','homingSpeedInput'].forEach(id => {
+   'xMaxSpeedInput','xAccelStepsInput','xStepsPerMmInput','xScaleInput',
+   'yMaxSpeedInput','yAccelStepsInput','yStepsPerMmInput','yScaleInput',
+   'homingSpeedInput','homingRetractInput','homingLatchHzInput'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
       el.addEventListener('input', markSettingsDirty);

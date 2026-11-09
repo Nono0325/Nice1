@@ -42,7 +42,7 @@ fn wait_motor_reach(
                     Some("HALL"),
                     Some("ERR_HALL_IN_FLIGHT_DROP"),
                     msg,
-                    Some(format!("當前座標={:.0}µs, 目標座標={:.0}µs", motor.current_pos(), target)),
+                    Some(format!("當前座標={:.1}mm, 目標座標={:.1}mm", motor.current_pos(), target)),
                 );
                 ctx.add_history(format!("❌ 緊急警報：{}", msg), "error");
                 return false;
@@ -54,7 +54,7 @@ fn wait_motor_reach(
         }
         if start.elapsed().as_secs_f64() > timeout_sec {
             let msg = format!(
-                "到位警告：馬達到位超時（目標={:.0}µs，當前={:.0}µs）",
+                "到位警告：馬達到位超時（目標={:.1}mm，當前={:.1}mm）",
                 target, cur
             );
             ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_MOTOR_REACH_TIMEOUT"), &msg, None);
@@ -96,11 +96,11 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
         loop {
             let (sys_run, pickup_act, pos_x_a, pos_x_b, pos_x_c, pos_z_d, pos_z_e, pos_z_half) = {
                 let s = ctx.state.read().unwrap();
-                let xa = s.x_min as f64;
-                let xc = s.x_max as f64;
+                let xa = s.x_min_mm;
+                let xc = s.x_max_mm;
                 let xb = (xa + xc) / 2.0;
-                let zd = s.z_max as f64;
-                let ze = s.z_min as f64;
+                let zd = s.z_min_mm; // 上升原點 (安全高度)
+                let ze = s.z_max_mm; // 下降取料面
                 let zhalf = (zd + ze) / 2.0;
                 (
                     s.system_run,
@@ -124,7 +124,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 1/14: X 軸前往 a 點 (歸零點)...", "info");
             ctx.set_servo_pulse("x", pos_x_a);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 1.5, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_x_a {
@@ -142,7 +142,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 2/14: Z 軸下降至 e 點 (向下極限取料面)...", "info");
             ctx.set_servo_pulse("z", pos_z_e);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 1.5, 12.0, false) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -169,7 +169,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 4/14: Z 軸上升至 d 點 (安全高度)...", "info");
             ctx.set_servo_pulse("z", pos_z_d);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 1.5, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_z_d {
@@ -226,17 +226,30 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             thread::sleep(Duration::from_millis(200));
 
-            // 步驟 6: X 軸到 c 點（搬運途中即時監控霍爾訊號防脫落）
+            // 步驟 6: X 軸到 c 點（模具安全聯鎖 + 全程監控防掉件）
             if !ctx.state.read().unwrap().system_run {
                 break;
             }
+
+            // 模具安全聯鎖：橫移進入衝壓模具區前，嚴格確認 Z 軸已完全上升至安全高度 (Z <= pos_z_d + 3.0mm)
+            let cur_z = ctx.z_stepper.current_pos();
+            if cur_z > (pos_z_d + 3.0) && !ctx.state.read().unwrap().lim_z_d {
+                let err_msg = "❌ 衝壓模具安全聯鎖觸發：Z 軸尚未完全提升至安全高度，禁止橫向進入模具區以防碰撞！";
+                ctx.add_error_log("CRITICAL", Some("SAFETY"), Some("ERR_DIE_ZONE_COLLISION_RISK"), err_msg, None);
+                ctx.add_history(err_msg, "error");
+                ctx.x_stepper.halt();
+                ctx.z_stepper.halt();
+                ctx.set_digital_output("magnet", false);
+                break;
+            }
+
             ctx.emit_ws(
                 "pickup_step",
                 json!({ "step": "move-mold2", "desc": "6. X軸前往c點" }),
             );
             ctx.add_history("步驟 6/14: X 軸移動至 c 點 (向右極限放料點，全程監控防掉件)...", "info");
             ctx.set_servo_pulse("x", pos_x_c);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_c, 15.0, 12.0, true) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_c, 1.5, 12.0, true) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -251,7 +264,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 7/14: Z 軸下降至 e 點 (放料深度)...", "info");
             ctx.set_servo_pulse("z", pos_z_e);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 15.0, 12.0, true) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_e, 1.5, 12.0, true) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -278,7 +291,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 9/14: Z 軸上升至 d 點 (安全高度)...", "info");
             ctx.set_servo_pulse("z", pos_z_d);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 1.5, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_z_d {
@@ -296,7 +309,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 10/14: X 軸移動至 b 點 (中間電感接近開關工位)...", "info");
             ctx.set_servo_pulse("x", pos_x_b);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_b, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_b, 1.5, 12.0, false) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -311,7 +324,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 11/14: Z 軸下降至 50% 中間避讓高度...", "info");
             ctx.set_servo_pulse("z", pos_z_half);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_half, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_half, 1.5, 12.0, false) {
                 break;
             }
             thread::sleep(Duration::from_millis(200));
@@ -357,7 +370,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 13/14: Z 軸上升至 d 點 (安全高度)...", "info");
             ctx.set_servo_pulse("z", pos_z_d);
-            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.z_stepper, pos_z_d, 1.5, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_z_d {
@@ -375,7 +388,7 @@ pub fn spawn_stamping_cycle(ctx: Arc<AppContext>) {
             );
             ctx.add_history("步驟 14/14: X 軸回到 a 點 (原點)...", "info");
             ctx.set_servo_pulse("x", pos_x_a);
-            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 15.0, 12.0, false) {
+            if !wait_motor_reach(&ctx, &ctx.x_stepper, pos_x_a, 1.5, 12.0, false) {
                 break;
             }
             if ctx.state.read().unwrap().lim_x_a {

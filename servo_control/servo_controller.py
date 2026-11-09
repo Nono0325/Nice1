@@ -203,23 +203,34 @@ state = {
     'y_min': PULSE_MIN,  # 相容
     'y_max': PULSE_MAX,  # 相容
     'x_min_mm': 0.0,
-    'x_max_mm': 200.0,
+    'x_max_mm': 300.0,
     'z_min_mm': 0.0,
     'z_max_mm': 200.0,
     'y_min_mm': 0.0,
     'y_max_mm': 200.0,
-    'x_scale': 10.0,     # 10 µs 對應 1 mm (500~2500 行程 = 0~200 mm)
+    'x_scale': 10.0,
     'z_scale': 10.0,
     'y_scale': 10.0,
 
-    # 速度與加減速規劃
-    'x_max_speed': 8000.0,
-    'x_accel_steps': 50.0,
-    'z_max_speed': 8000.0,
-    'z_accel_steps': 50.0,
-    'y_max_speed': 8000.0,
-    'y_accel_steps': 50.0,
-    'homing_speed_hz': 2500.0,  # 閉迴路步進馬達穩定歸零頻率
+    # 57BYG-112 傳動比與工業運動參數
+    'x_steps_per_mm': 320.0,
+    'z_steps_per_mm': 320.0,
+    'y_steps_per_mm': 320.0,
+    'x_microsteps': 1600,
+    'z_microsteps': 1600,
+    'x_lead_mm': 5.0,
+    'z_lead_mm': 5.0,
+    'homing_retract_mm': 3.0,
+    'homing_latch_hz': 350.0,
+
+    # 速度與加減速規劃 (高速微秒級脈衝)
+    'x_max_speed': 16000.0,
+    'x_accel_steps': 600.0,
+    'z_max_speed': 16000.0,
+    'z_accel_steps': 600.0,
+    'y_max_speed': 16000.0,
+    'y_accel_steps': 600.0,
+    'homing_speed_hz': 2000.0,
 
     # 致能狀態
     'motor_locked': True,

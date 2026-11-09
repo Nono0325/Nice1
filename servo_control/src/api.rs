@@ -168,20 +168,20 @@ pub async fn api_move(
         .and_then(|v| v.as_str())
         .unwrap_or("x")
         .to_lowercase();
-    let delta_mm = data.get("delta_mm").and_then(|v| v.as_f64());
-    let mut delta_us = data.get("delta").and_then(|v| v.as_f64());
-    let target_mm = data.get("target_mm").and_then(|v| v.as_f64());
-    let mut target_us = data.get("target").and_then(|v| v.as_f64());
+    let delta_mm_in = data.get("delta_mm").and_then(|v| v.as_f64());
+    let delta_us_in = data.get("delta").and_then(|v| v.as_f64());
+    let target_mm_in = data.get("target_mm").and_then(|v| v.as_f64());
+    let target_us_in = data.get("target").and_then(|v| v.as_f64());
 
-    let (sys_run, scale, x_min, x_max, z_min, z_max, lim_xa, lim_xc, lim_ze, lim_zd) = {
+    let (sys_run, scale, x_min_mm, x_max_mm, z_min_mm, z_max_mm, lim_xa, lim_xc, lim_ze, lim_zd) = {
         let s = ctx.state.read().unwrap();
         (
             s.system_run,
             if axis == "x" { s.x_scale } else { s.z_scale },
-            s.x_min as f64,
-            s.x_max as f64,
-            s.z_min as f64,
-            s.z_max as f64,
+            s.x_min_mm,
+            s.x_max_mm,
+            s.z_min_mm,
+            s.z_max_mm,
             s.lim_x_a || s.lim_left,
             s.lim_x_c || s.lim_right,
             s.lim_z_e || s.lim_down,
@@ -193,22 +193,20 @@ pub async fn api_move(
         return Json(json!({ "ok": false, "msg": "系統未啟動，請按 START" }));
     }
 
-    if let Some(mm) = delta_mm {
-        delta_us = Some(mm * scale);
-    }
-    if let Some(mm) = target_mm {
-        let base_min = if axis == "x" { x_min } else { z_min };
-        target_us = Some(base_min + mm * scale);
-    }
+    let delta_mm = delta_mm_in.or_else(|| delta_us_in.map(|u| u / scale.max(0.001)));
+    let target_mm = target_mm_in.or_else(|| target_us_in.map(|u| {
+        let base_min = if axis == "x" { x_min_mm } else { z_min_mm };
+        base_min + (u / scale.max(0.001))
+    }));
 
     let is_pi = ctx.is_raspberry_pi;
-    let hw_lim_xa = lim_xa || (is_pi && (!ctx.gpio.read_pin(17) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
-    let hw_lim_xc = lim_xc || (is_pi && !ctx.gpio.read_pin(27));
-    let hw_lim_zd = lim_zd || (is_pi && (!ctx.gpio.read_pin(22) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7) || !ctx.gpio.read_pin(8) || !ctx.gpio.read_pin(9)));
-    let hw_lim_ze = lim_ze || (is_pi && !ctx.gpio.read_pin(23));
+    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_low_debounced(17) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7)));
+    let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_low_debounced(27));
+    let hw_lim_zd = lim_zd || (is_pi && (ctx.gpio.is_pin_active_low_debounced(22) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7) || ctx.gpio.is_pin_active_low_debounced(8) || ctx.gpio.is_pin_active_low_debounced(9)));
+    let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_low_debounced(23));
 
     if axis == "x" {
-        if let Some(d) = delta_us {
+        if let Some(d) = delta_mm {
             if hw_lim_xa && d < 0.0 {
                 ctx.x_stepper.halt();
                 ctx.x_stepper.set_position(0.0);
@@ -220,17 +218,17 @@ pub async fn api_move(
                 ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_C"), "X 軸 c 點右側限位開關觸發，攔截正向移動", None);
                 return Json(json!({ "ok": false, "msg": "X 軸 c 點右側限位觸發" }));
             }
-            ctx.x_stepper.add_target_delta(d, 0.0, x_max);
-        } else if let Some(t) = target_us {
+            ctx.x_stepper.add_target_delta(d, x_min_mm, x_max_mm);
+        } else if let Some(t) = target_mm {
             if hw_lim_xa && t <= 0.0 {
                 ctx.x_stepper.halt();
                 ctx.x_stepper.set_position(0.0);
                 return Json(json!({ "ok": false, "msg": "X 軸已在原點，禁止繼續向後移動" }));
             }
-            ctx.x_stepper.set_target(t, 0.0, x_max);
+            ctx.x_stepper.set_target(t, x_min_mm, x_max_mm);
         }
     } else if matches!(axis.as_str(), "z" | "y" | "y1" | "y2") {
-        if let Some(d) = delta_us {
+        if let Some(d) = delta_mm {
             if (hw_lim_zd || hw_lim_ze) && d < 0.0 {
                 ctx.z_stepper.halt();
                 ctx.z_stepper.set_position(0.0);
@@ -242,14 +240,14 @@ pub async fn api_move(
                 ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Z 軸上極限觸發，攔截正向移動", None);
                 return Json(json!({ "ok": false, "msg": "Z 軸限位觸發" }));
             }
-            ctx.z_stepper.add_target_delta(d, 0.0, z_max);
-        } else if let Some(t) = target_us {
+            ctx.z_stepper.add_target_delta(d, z_min_mm, z_max_mm);
+        } else if let Some(t) = target_mm {
             if (hw_lim_zd || hw_lim_ze) && t <= 0.0 {
                 ctx.z_stepper.halt();
                 ctx.z_stepper.set_position(0.0);
                 return Json(json!({ "ok": false, "msg": "Z 軸已在原點，禁止繼續向後移動" }));
             }
-            ctx.z_stepper.set_target(t, 0.0, z_max);
+            ctx.z_stepper.set_target(t, z_min_mm, z_max_mm);
         }
     }
 
@@ -258,6 +256,8 @@ pub async fn api_move(
         "ok": true,
         "x_pulse": s.x_pulse,
         "z_pulse": s.z_pulse,
+        "x_mm": s.x_mm,
+        "z_mm": s.z_mm,
         "y1_pulse": s.y1_pulse,
         "y2_pulse": s.y2_pulse
     }))
@@ -278,16 +278,16 @@ pub async fn api_set_position(
         .unwrap_or(50.0)
         .clamp(0.0, 100.0);
 
-    let (sys_run, x_min, x_max, z_min, z_max, x_pulse, z_pulse, lim_xa, lim_xc, lim_zd, lim_ze) = {
+    let (sys_run, x_min_mm, x_max_mm, z_min_mm, z_max_mm, cur_x_mm, cur_z_mm, lim_xa, lim_xc, lim_zd, lim_ze) = {
         let s = ctx.state.read().unwrap();
         (
             s.system_run,
-            s.x_min as f64,
-            s.x_max as f64,
-            s.z_min as f64,
-            s.z_max as f64,
-            s.x_pulse as f64,
-            s.z_pulse as f64,
+            s.x_min_mm,
+            s.x_max_mm,
+            s.z_min_mm,
+            s.z_max_mm,
+            s.x_mm,
+            s.z_mm,
             s.lim_x_a || s.lim_left,
             s.lim_x_c || s.lim_right,
             s.lim_z_d || s.lim_up,
@@ -299,25 +299,25 @@ pub async fn api_set_position(
     }
 
     if axis == "x" {
-        let pulse = x_min + (x_max - x_min) * pct / 100.0;
-        let diff = pulse - x_pulse;
+        let target_mm = x_min_mm + (x_max_mm - x_min_mm) * pct / 100.0;
+        let diff = target_mm - cur_x_mm;
         if lim_xa && diff < 0.0 {
             return Json(json!({ "ok": false, "msg": "X 軸左側 a 點限位" }));
         }
         if lim_xc && diff > 0.0 {
             return Json(json!({ "ok": false, "msg": "X 軸右側 c 點限位" }));
         }
-        ctx.set_servo_pulse("x", pulse);
+        ctx.x_stepper.set_target(target_mm, x_min_mm, x_max_mm);
     } else if matches!(axis.as_str(), "z" | "y" | "y1" | "y2") {
-        let pulse = z_min + (z_max - z_min) * pct / 100.0;
-        let diff = pulse - z_pulse;
+        let target_mm = z_min_mm + (z_max_mm - z_min_mm) * pct / 100.0;
+        let diff = target_mm - cur_z_mm;
         if lim_zd && diff > 0.0 {
             return Json(json!({ "ok": false, "msg": "Z 軸上側 d 點限位" }));
         }
         if lim_ze && diff < 0.0 {
             return Json(json!({ "ok": false, "msg": "Z 軸下側 e 點限位" }));
         }
-        ctx.set_servo_pulse("z", pulse);
+        ctx.z_stepper.set_target(target_mm, z_min_mm, z_max_mm);
     }
 
     Json(json!({ "ok": true }))
@@ -679,6 +679,22 @@ pub async fn api_set_limits(
         if let Some(hspd) = parse_f64(data.get("homing_speed_hz")) {
             s.homing_speed_hz = hspd.clamp(100.0, 25000.0);
         }
+
+        if let Some(spu) = parse_f64(data.get("x_steps_per_mm")) {
+            s.x_steps_per_mm = spu.max(0.1);
+            ctx.x_stepper.set_steps_per_unit(s.x_steps_per_mm);
+        }
+        if let Some(spu) = parse_f64(data.get("z_steps_per_mm").or_else(|| data.get("y_steps_per_mm"))) {
+            s.z_steps_per_mm = spu.max(0.1);
+            s.y_steps_per_mm = s.z_steps_per_mm;
+            ctx.z_stepper.set_steps_per_unit(s.z_steps_per_mm);
+        }
+        if let Some(v) = parse_f64(data.get("x_microsteps")) { s.x_microsteps = v as u32; }
+        if let Some(v) = parse_f64(data.get("z_microsteps")) { s.z_microsteps = v as u32; }
+        if let Some(v) = parse_f64(data.get("x_lead_mm")) { s.x_lead_mm = v.max(0.01); }
+        if let Some(v) = parse_f64(data.get("z_lead_mm")) { s.z_lead_mm = v.max(0.01); }
+        if let Some(v) = parse_f64(data.get("homing_retract_mm")) { s.homing_retract_mm = v.max(0.5); }
+        if let Some(v) = parse_f64(data.get("homing_latch_hz")) { s.homing_latch_hz = v.clamp(50.0, 5000.0); }
 
         if data.get("x_scale").is_some() && x_min_mm_in.is_none() && x_max_mm_in.is_none() {
             s.x_max_mm = ((s.x_min_mm + (s.x_max - s.x_min) as f64 / s.x_scale.max(0.001)) * 10.0)

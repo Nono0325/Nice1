@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="樹梅派伺服馬達控制系統 - 即時監控與控制 X/Y 軸伺服馬達">
-  <title>伺服馬達控制系統 | Servo Motor Controller</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=1.0.7">
+  <meta name="description" content="樹梅派伺服馬達控制系統 v2.2.0 - 即時監控與控制 X/Z 軸步進馬達與電磁鐵自動化系統">
+  <title>伺服馬達控制系統 v2.2.0 | Servo Motor Controller</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=2.2.0">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -15,8 +15,10 @@
 <div id="globalLoginOverlay" style="position:fixed;inset:0;z-index:9999;background:rgba(3,7,18,0.96);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center">
   <div style="background:var(--bg-card);border:1px solid rgba(59,130,246,0.4);border-radius:20px;padding:52px 44px;max-width:440px;width:92%;text-align:center;box-shadow:0 30px 60px rgba(0,0,0,0.9),0 0 80px rgba(59,130,246,0.1)">
     <div style="font-size:60px;margin-bottom:14px">🔐</div>
-    <div style="font-family:'Orbitron',monospace;font-size:22px;font-weight:700;color:var(--accent-cyan);letter-spacing:2px;margin-bottom:4px">SERVO CONTROLLER</div>
-    <div style="font-size:12px;color:var(--text-dim);margin-bottom:28px">Raspberry Pi Motor Control System &mdash; Secure Access</div>
+    <div style="font-family:'Orbitron',monospace;font-size:22px;font-weight:700;color:var(--accent-cyan);letter-spacing:2px;margin-bottom:4px">
+      SERVO CONTROLLER <span style="font-size:12px;padding:2px 8px;border-radius:6px;background:rgba(59,130,246,0.2);border:1px solid rgba(59,130,246,0.4);color:var(--accent-cyan);font-weight:400;vertical-align:middle">v2.2.0</span>
+    </div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:28px">Raspberry Pi Motor Control System &mdash; v2.2.0 Secure Access</div>
     <form onsubmit="siteLogin(event)" autocomplete="off">
       <input type="password" id="siteLoginPassword" placeholder="輸入系統密碼..."
         style="width:100%;padding:14px 16px;border-radius:8px;background:#060a10;border:1px solid var(--border);color:#f8fafc;font-size:15px;text-align:center;margin-bottom:14px;box-sizing:border-box;letter-spacing:2px"
@@ -100,11 +102,18 @@
   <div class="navbar-brand">
     <div class="navbar-logo">⚙️</div>
     <div>
-      <div class="navbar-title">SERVO CONTROLLER</div>
+      <div class="navbar-title">
+        SERVO CONTROLLER
+        <span class="version-badge" style="font-size:11px;padding:2px 7px;border-radius:6px;background:rgba(59,130,246,0.18);border:1px solid rgba(59,130,246,0.4);color:var(--accent-cyan);vertical-align:middle;margin-left:6px;font-family:'JetBrains Mono',monospace;letter-spacing:0">v2.2.0</span>
+      </div>
       <div class="navbar-subtitle">Raspberry Pi Motor Control System</div>
     </div>
   </div>
   <div class="navbar-status">
+    <div class="status-badge" id="badgeVersion" title="系統版本 (v2.2.0 - 閉迴路步進與原點安全旗艦版)">
+      <span>🏷️</span>
+      <span id="txtVersion">v2.2.0</span>
+    </div>
     <div class="status-badge">
       <div class="status-dot" id="wsStatusDot"></div>
       <span id="wsStatusText">連線中...</span>
@@ -1546,6 +1555,6 @@
 
 </div><!-- end main-container -->
 
-<script src="/static/js/app.js?v=2.0.3"></script>
+<script src="/static/js/app.js?v=2.2.0"></script>
 </body>
 </html>

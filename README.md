@@ -1,7 +1,8 @@
-# 🤖 衝壓機自動化搬運與步進馬達控制系統 (Raspberry Pi Stepper Controller)
+# 🤖 衝壓機自動化搬運與步進馬達控制系統 (v2.2.0 Industrial Edition)
 
-> **工業級衝壓自動化系統** — 樹梅派 X/Z 軸步進馬達控制器 (QN-1805-E1 方形電感接近開關 + 4組 LSD-P25/20 圓形強力直流電磁鐵 + 8顆末端霍爾金屬檢測) + 原生雙向 WebSocket 即時監控 + 積木式移動程式工作坊 + G-code 編輯器 + Web 系統終端機 + OTA 線上更新
+> **工業級衝壓自動化系統** — 樹梅派 X/Z 軸步進馬達控制器 (QN-1805-E1 方形電感接近開關 + 4組 LSD-P25/20 圓形強力直流電磁鐵 + 8顆末端霍爾金屬檢測) + 原生雙向 WebSocket 即時監控 + 積木式移動程式工作坊 + G-code 編輯器 + Web 系統終端機 + 錯誤日誌輸出中心 + OTA 線上更新
 
+[![Version](https://img.shields.io/badge/version-v2.2.0-blue?logo=rust)](servo_control/Cargo.toml)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Nono0325%2FNice1-181717?logo=github)](https://github.com/Nono0325/Nice1)
 [![Rust](https://img.shields.io/badge/Rust-2021%20Edition-DE522D?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Axum](https://img.shields.io/badge/Axum-0.7%20Tokio-000000?logo=rust)](https://github.com/tokio-rs/axum)
@@ -224,6 +225,17 @@ sudo systemctl stop servo-control
 # 關閉開機自動執行
 sudo systemctl disable servo-control
 ```
+
+---
+
+## 📜 版本發行與歷史紀錄 (Version Changelog)
+
+| 版本 | 發布亮點與變更項目 | 系統核心 |
+|:---:|---|:---:|
+| **v2.2.0** <br>*(最新穩定版)* | • **全行程安全歸零機制 (Safe Homing Cycle)**：即便目前座標為 0 亦可自動安全退開後重新尋找物理極限開關與原點。<br>• **微秒級硬體 GPIO 即時防撞聯鎖**：向後移動時觸發霍爾或接近開關立即硬體停止脈衝並強制鎖定坐標至 0.0 mm。<br>• **物理原點校準徹底修復**：霍爾/接近開關歸零觸發後精準重設為 `0.0 mm / 0 µs (0.0%)`，徹底解決坐標不歸零問題。<br>• **閉迴路步進驅動器優化**：適配 57BYG-112 (3.6Nm) 閉迴路步進馬達與數位步進驅動器（細分、方向與電流參數標準化），解決馬達低速抖動與行程縮放問題。<br>• **行程邊界設定**：全面支援 `µs` 與 `mm` 雙單位切換，消弭數值超界與極限錯位問題。 | Rust 2.0 / Axum / rppal / Python 雙核心 |
+| **v2.1.0** | • **即時錯誤日誌輸出中心 (Error Log Center)**：集中式展示即時系統錯誤、警告與操作日誌，支援一鍵匯出與診斷。<br>• **GitHub OTA 自動版本檢查與一鍵更新**：後台自動輪詢與手動檢查遠端更新，在網頁前端彈出版本通知並自動重啟。<br>• **UI 2D 動態雙軸 mm 刻度軌跡**：移除 3D 冗餘負載，專注於工業級高更新率動態軌跡視覺化。 | Rust 2.0 / Axum / Python |
+| **v2.0.0** | • **Rust 2.0 高效能核心重構**：全面導入 Rust (Axum + Tokio + rppal)，突破 Python GIL 限制，實現微秒級確定性硬體脈衝。<br>• **8 顆末端霍爾金屬檢測開關**：兩兩一組共 4 組（817 光耦隔離板防突波與硬體抗噪）。<br>• **4 組 LSD-P25/20 圓形強力直流電磁鐵**：JQC-3FF-S-Z 繼電器驅動，支援全開、全關與單組獨立開關。 | Rust 2.0 初始版本 |
+| **v1.0.0** | • **初始原型系統**：Python Flask + Socket.IO + pigpio/RPi.GPIO 步進馬達控制系統。 | Python Flask |
 
 ---
 

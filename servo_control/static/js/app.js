@@ -1,7 +1,9 @@
 /**
- * 樹梅派伺服馬達控制系統 - 前端 JavaScript
+ * 樹梅派伺服馬達控制系統 - 前端 JavaScript (v2.2.0)
  * Raspberry Pi Servo Motor Controller - Frontend App
  */
+
+const APP_VERSION = 'v2.2.0';
 
 // ── 原生 Rust WebSocket (/ws) 高速連線引擎（向下相容 Socket.IO + HTTP 備援）──
 function createRustSocket() {
@@ -115,6 +117,7 @@ const socket = createRustSocket();
 
 // ── 全域狀態 ──────────────────────────────────────────────────
 let state = {
+  app_version: APP_VERSION,
   x_pulse: 1500, z_pulse: 1500, y1_pulse: 1500, y2_pulse: 1500,
   x_mm: 100.0, z_mm: 100.0, y_mm: 100.0,
   x_pct: 50, z_pct: 50, y_pct: 50,
@@ -406,6 +409,13 @@ function updateDiagWsTag(online) {
 // ── UI 更新 ─────────────────────────────────────────────────
 function updateUI() {
   const s = state;
+
+  // 系統版本標籤
+  const verEl = document.getElementById('txtVersion');
+  if (verEl) {
+    const v = s.app_version || APP_VERSION;
+    verEl.textContent = v.startsWith('v') ? v : `v${v}`;
+  }
 
   // 時鐘與長週期監控指標 (Uptime / Watchdog)
   document.getElementById('systemTimestamp').textContent = s.timestamp || '--:--:--';

@@ -192,8 +192,9 @@ async fn main() {
     let ctx = AppContext::new(base_dir.clone());
 
     println!("============================================================");
-    println!("  🦀 樹莓派步進馬達與電磁鐵控制系統 (Rust 2.0 高效能架構)");
-    println!("  Raspberry Pi Stepper Motor Controller — Powered by Rust");
+    println!("  🦀 樹莓派步進馬達與電磁鐵控制系統 v{} (Rust 2.0 高效能架構)", crate::state::APP_VERSION);
+    println!("  Raspberry Pi Stepper Motor Controller v{} — Powered by Rust", crate::state::APP_VERSION);
+    println!("  版本: v{}", crate::state::APP_VERSION);
     println!("  模式: {}", ctx.state.read().unwrap().gpio_mode);
     println!("  資源目錄: {}", base_dir.display());
     println!("============================================================");

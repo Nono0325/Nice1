@@ -1,6 +1,6 @@
 [package]
 name = "servo_control"
-version = "2.0.0"
+version = "2.2.0"
 edition = "2021"
 authors = ["Nice Stamping Automation Team"]
 description = "Industrial Raspberry Pi Stepper Motor & Electromagnet Controller in Rust"

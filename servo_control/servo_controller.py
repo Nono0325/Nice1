@@ -46,6 +46,8 @@ socketio = SocketIO(
     max_http_buffer_size=1000000
 )
 
+APP_VERSION = '2.2.0'
+
 # ── GPIO 模式偵測（非 Pi 環境使用 Mock） ───────────────────────────
 IS_RASPBERRY_PI = False
 try:
@@ -243,6 +245,7 @@ state = {
     # 最後更新時間
     'timestamp': '',
     'gpio_mode': 'Raspberry Pi (Real)' if IS_RASPBERRY_PI else 'Simulation',
+    'app_version': f'v{APP_VERSION}',
     # 安全設定
     'lock_timeout_min': 30,
 }

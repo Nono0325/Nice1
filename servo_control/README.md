@@ -1,7 +1,8 @@
-# 🤖 樹梅派步進馬達控制系統 (Raspberry Pi Stepper Motor Controller)
+# 🤖 樹梅派步進馬達控制系統 (v2.2.0 Industrial Edition)
 
-> **衝壓機自動化搬運系統** — Raspberry Pi X/Z 軸步進馬達控制器 (QN-1805-E1 電感接近開關 + 4組 LSD-P25/20 圓形強力電磁鐵 + 8顆末端霍爾金屬檢測) + 原生 WebSocket 即時網頁監控 + 積木式移動程式工作坊 + G-code 編輯器 + 系統終端機
+> **衝壓機自動化搬運系統** — Raspberry Pi X/Z 軸步進馬達控制器 (QN-1805-E1 電感接近開關 + 4組 LSD-P25/20 圓形強力電磁鐵 + 8顆末端霍爾金屬檢測) + 原生 WebSocket 即時網頁監控 + 積木式移動程式工作坊 + G-code 編輯器 + 錯誤日誌輸出中心 + 系統終端機
 
+[![Version](https://img.shields.io/badge/version-v2.2.0-blue?logo=rust)](Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-2021%20Edition-DE522D?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Axum](https://img.shields.io/badge/Axum-0.7%20Tokio-000000?logo=rust)](https://github.com/tokio-rs/axum)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python)](https://python.org)
@@ -235,6 +236,17 @@ Nice/
 - **自動重啟**：若程式崩潰，5 秒後自動重啟
 - **依賴服務**：在 `network.target` 和 `pigpiod.service` 之後啟動
 - **日誌整合**：可透過 `journalctl -u servo-control` 檢視完整日誌
+
+---
+
+## 📜 版本發行紀錄 (Version Changelog)
+
+| 版本 | 發布亮點與變更項目 |
+|:---:|---|
+| **v2.2.0** *(最新穩定版)* | • **全行程安全歸零機制 (Safe Homing Cycle)**：即便目前座標為 0 亦可自動安全退開後重新尋找物理極限開關與原點。<br>• **微秒級硬體 GPIO 即時防撞聯鎖**：向後移動時觸發霍爾或接近開關立即硬體停止脈衝並強制鎖定坐標至 0.0 mm。<br>• **物理原點校準徹底修復**：霍爾/接近開關歸零觸發後精準重設為 `0.0 mm / 0 µs (0.0%)`。<br>• **閉迴路步進驅動器優化**：適配 57BYG-112 (3.6Nm) 閉迴路步進馬達與數位步進驅動器（細分、方向與電流參數標準化），解決馬達低速抖動與行程縮放問題。<br>• **行程邊界設定**：全面支援 `µs` 與 `mm` 雙單位切換，消弭數值超界與極限錯位問題。 |
+| **v2.1.0** | • **即時錯誤日誌輸出中心 (Error Log Center)**：集中式展示即時系統錯誤、警告與操作日誌，支援一鍵匯出與診斷。<br>• **GitHub OTA 自動版本檢查與一鍵更新**：後台自動輪詢與手動檢查遠端更新，在網頁前端彈出版本通知並自動重啟。<br>• **UI 2D 動態雙軸 mm 刻度軌跡**：移除 3D 冗餘負載，專注於工業級高更新率動態軌跡視覺化。 |
+| **v2.0.0** | • **Rust 2.0 高效能核心重構**：全面導入 Rust (Axum + Tokio + rppal)，突破 Python GIL 限制。<br>• **8 顆末端霍爾金屬檢測開關**：兩兩一組共 4 組（817 光耦隔離板防突波與硬體抗噪）。<br>• **4 組 LSD-P25/20 圓形強力直流電磁鐵**：JQC-3FF-S-Z 繼電器驅動。 |
+| **v1.0.0** | • **初始原型系統**：Python Flask + Socket.IO + pigpio/RPi.GPIO 步進馬達控制系統。 |
 
 ---
 

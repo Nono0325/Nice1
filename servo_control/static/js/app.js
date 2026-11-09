@@ -473,6 +473,7 @@ function updateUI() {
       errBanner.classList.remove('visible');
     }
   }
+  updateErrorAlarmBanner(s.error, s.error_msg);
 
   // X 軸位置軌跡與數值
   const xPct = Math.max(0, Math.min(100, s.x_pct || 0));
@@ -773,6 +774,10 @@ function switchTab(name) {
   if (name === 'terminal') {
     updateTerminalUI(!!terminalAuthToken);
   }
+
+  if (name === 'errors') {
+    loadErrorLogs();
+  }
 }
 
 // ── 系統控制 ─────────────────────────────────────────────────
@@ -1014,6 +1019,7 @@ function clearError() {
   state.error = false;
   state.error_msg = '';
   document.getElementById('errorBanner')?.classList.remove('visible');
+  resolveAllErrors(true);
 }
 
 // ── 診斷 ─────────────────────────────────────────────────────
@@ -3009,5 +3015,348 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 啟動 GitHub 自動版本巡檢與彈窗提示器
   initAutoUpdateChecker();
+
+  // 啟動全域錯誤日誌中心與前端例外捕捉
+  initFrontendErrorCapture();
+  loadErrorLogs();
 });
+
+// ════════════════════════════════════════════════════════════════════
+// 🚨 錯誤日誌中心 (Error Log Output Center)
+// ════════════════════════════════════════════════════════════════════
+let errorLogList = [];
+let errorLevelFilter = 'ALL';
+
+socket.on('new_error', (entry) => {
+  if (!entry) return;
+  if (!errorLogList.some(e => e.id === entry.id && e.time === entry.time)) {
+    errorLogList.push(entry);
+    if (errorLogList.length > 500) errorLogList.shift();
+  }
+  updateErrorStatsAndBadge();
+  renderErrorLogs();
+});
+
+function updateErrorAlarmBanner(isAlarm, alarmMsg) {
+  const card = document.getElementById('errAlarmCard');
+  const stateEl = document.getElementById('errPageAlarmState');
+  const subEl = document.getElementById('errPageAlarmSub');
+  if (!card || !stateEl) return;
+  if (isAlarm) {
+    card.style.borderLeftColor = 'var(--accent-red)';
+    card.style.background = 'rgba(127, 29, 29, 0.16)';
+    stateEl.style.color = 'var(--accent-red)';
+    stateEl.textContent = `🔴 警報觸發中: ${alarmMsg || '系統異常保護啟動'}`;
+    if (subEl) subEl.textContent = '請檢查下方錯誤日誌原因，排除異常後點擊右上角「✅ 解除警報並標記已讀」';
+  } else {
+    card.style.borderLeftColor = 'var(--accent-green)';
+    card.style.background = '';
+    stateEl.style.color = 'var(--accent-green)';
+    stateEl.textContent = '🟢 正常無活躍警報 (NORMAL)';
+    if (subEl) subEl.textContent = '監控範圍：馬達限位、電磁鐵過熱、霍爾檢知、巨集/G-code、API 與前端例外';
+  }
+}
+
+function updateErrorStatsAndBadge() {
+  const errCount = errorLogList.filter(e => e.level === 'ERROR' || e.level === 'CRITICAL').length;
+  const warnCount = errorLogList.filter(e => e.level === 'WARN').length;
+  const unresolvedCount = errorLogList.filter(e => !e.resolved).length;
+  const lastEntry = errorLogList.length > 0 ? errorLogList[errorLogList.length - 1] : null;
+
+  setElText('errStatErrors', errCount);
+  setElText('errStatWarns', warnCount);
+  setElText('errStatUnresolved', unresolvedCount);
+  setElText('errCountAll', errorLogList.length);
+  setElText('errStatLastTime', lastEntry ? `最後記錄：${lastEntry.time}` : '最後記錄：尚無紀錄');
+
+  const badge = document.getElementById('tabErrorBadge');
+  if (badge) {
+    const badgeCount = unresolvedCount > 0 ? unresolvedCount : errCount;
+    if (badgeCount > 0) {
+      badge.style.display = 'inline-block';
+      badge.textContent = badgeCount;
+      badge.style.background = unresolvedCount > 0 ? 'var(--accent-red)' : 'rgba(239,68,68,0.6)';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+async function loadErrorLogs() {
+  try {
+    const r = await fetch('/api/errors', { cache: 'no-store' });
+    const data = await r.json();
+    if (data.ok && Array.isArray(data.errors)) {
+      errorLogList = data.errors;
+      if (data.active_error !== undefined) {
+        updateErrorAlarmBanner(data.active_error, data.active_error_msg);
+      }
+      updateErrorStatsAndBadge();
+      renderErrorLogs();
+    }
+  } catch (e) {
+    console.error('[ErrorLog] Failed to load error logs:', e);
+  }
+}
+
+function setErrorLevelFilter(lvl) {
+  errorLevelFilter = lvl;
+  ['ALL', 'ERROR', 'WARN', 'UNRESOLVED'].forEach(k => {
+    const btn = document.getElementById(`errFilterBtn-${k}`);
+    if (btn) btn.classList.toggle('active', k === lvl);
+  });
+  renderErrorLogs();
+}
+
+function getFilteredErrorLogs() {
+  const srcFilter = document.getElementById('errSourceFilter')?.value || 'ALL';
+  const kw = (document.getElementById('errSearchInput')?.value || '').trim().toLowerCase();
+
+  return errorLogList.filter(item => {
+    const lvl = (item.level || 'ERROR').toUpperCase();
+    const src = (item.source || 'SYSTEM').toUpperCase();
+    if (errorLevelFilter === 'ERROR' && lvl !== 'ERROR' && lvl !== 'CRITICAL') return false;
+    if (errorLevelFilter === 'WARN' && lvl !== 'WARN') return false;
+    if (errorLevelFilter === 'UNRESOLVED' && item.resolved) return false;
+    if (srcFilter !== 'ALL' && src !== srcFilter) return false;
+    if (kw) {
+      const hay = `${item.time || ''} ${lvl} ${src} ${item.code || ''} ${item.msg || ''} ${item.detail || ''}`.toLowerCase();
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+}
+
+function renderErrorLogs() {
+  const consoleEl = document.getElementById('errorConsoleStream');
+  const tbody = document.getElementById('errorLogTableBody');
+  const summaryEl = document.getElementById('errTableSummary');
+  if (!consoleEl || !tbody) return;
+
+  const filtered = getFilteredErrorLogs();
+  if (summaryEl) {
+    summaryEl.textContent = `顯示 ${filtered.length} / 共 ${errorLogList.length} 筆紀錄`;
+  }
+
+  // 1. 渲染即時 Error Console 終端機日誌輸出串流 (依時間順序)
+  if (filtered.length === 0) {
+    consoleEl.innerHTML = `<div style="color:var(--accent-green)">[SYSTEM] ✔ 目前無符合篩選條件的 Error / Warn 日誌輸出。</div>`;
+  } else {
+    consoleEl.innerHTML = filtered.map(item => {
+      const isErr = (item.level || '').toUpperCase() !== 'WARN';
+      const lvlColor = isErr ? '#f87171' : '#fbbf24';
+      const msgColor = isErr ? '#fecaca' : '#fde68a';
+      const statusTag = item.resolved
+        ? `<span style="color:#4ade80">[RESOLVED]</span>`
+        : `<span style="color:${lvlColor}">[ACTIVE]</span>`;
+      return `<div style="border-bottom:1px dashed rgba(51,65,85,0.45);padding:3px 0">` +
+        `<span style="color:#64748b">#${item.id || '-'}</span> ` +
+        `<span style="color:#38bdf8">[${escapeHtml(item.time || '-')}]</span> ` +
+        `<span style="color:${lvlColor};font-weight:700">[${escapeHtml(item.level || 'ERROR')}]</span> ` +
+        `<span style="color:#c084fc">[${escapeHtml(item.source || 'SYSTEM')}/${escapeHtml(item.code || 'ERR')}]</span> ` +
+        `${statusTag} ` +
+        `<strong style="color:${msgColor}">${escapeHtml(item.msg || '')}</strong> ` +
+        `<span style="color:#94a3b8;font-size:11px">| Snapshot: ${escapeHtml(item.detail || '-')}</span>` +
+        `</div>`;
+    }).join('');
+    if (document.getElementById('errAutoScroll')?.checked) {
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+  }
+
+  // 2. 渲染結構化錯誤明細表格 (最新在最上方)
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:28px">🎉 目前尚無符合條件的錯誤日誌紀錄</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = [...filtered].reverse().map(item => {
+    const isErr = (item.level || '').toUpperCase() !== 'WARN';
+    const badgeBg = isErr ? 'rgba(239,68,68,0.2)' : 'rgba(251,191,36,0.2)';
+    const badgeColor = isErr ? 'var(--accent-red)' : 'var(--accent-amber)';
+    const badgeBorder = isErr ? 'rgba(239,68,68,0.5)' : 'rgba(251,191,36,0.5)';
+    const rowBg = !item.resolved && isErr ? 'rgba(127,29,29,0.12)' : 'transparent';
+
+    const statusHtml = item.resolved
+      ? `<span class="tag tag-green" style="font-size:10px">✔ 已處理</span>`
+      : `<button class="btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--accent-cyan);color:var(--accent-cyan);background:rgba(56,189,248,0.1)" onclick="resolveSingleError(${item.id})">標記已讀</button>`;
+
+    return `<tr style="background:${rowBg}">
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim)">#${item.id || '-'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-sec)">${escapeHtml(item.time || '-')}</td>
+      <td>
+        <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;background:${badgeBg};color:${badgeColor};border:1px solid ${badgeBorder}">
+          ${isErr ? '🔴 ' : '🟡 '}${escapeHtml(item.level || 'ERROR')}
+        </span>
+      </td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">
+        <div style="color:var(--accent-cyan);font-weight:700">${escapeHtml(item.source || 'SYSTEM')}</div>
+        <div style="color:var(--text-dim);font-size:10px">${escapeHtml(item.code || 'ERR_SYSTEM')}</div>
+      </td>
+      <td style="color:${isErr ? '#fca5a5' : 'var(--text-main)'};font-size:12px;font-weight:${isErr ? '600' : '400'}">
+        ${escapeHtml(item.msg || '')}
+      </td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim)">
+        ${escapeHtml(item.detail || '-')}
+      </td>
+      <td style="text-align:center">${statusHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function resolveSingleError(id) {
+  const r = await apiPost('/api/errors/resolve', { id });
+  if (r.ok) {
+    const target = errorLogList.find(e => e.id === id);
+    if (target) target.resolved = true;
+    updateErrorStatsAndBadge();
+    renderErrorLogs();
+  }
+}
+
+async function resolveAllErrors(silent = false) {
+  const r = await apiPost('/api/errors/resolve', {});
+  if (r.ok) {
+    state.error = false;
+    state.error_msg = '';
+    errorLogList.forEach(e => { e.resolved = true; });
+    document.getElementById('errorBanner')?.classList.remove('visible');
+    updateErrorAlarmBanner(false, '');
+    updateErrorStatsAndBadge();
+    renderErrorLogs();
+    if (!silent) toast('✅ 已解除系統警報並將所有錯誤標記為已讀', 'success');
+  }
+}
+
+async function clearAllErrorLogs() {
+  try {
+    const r = await fetch('/api/errors', { method: 'DELETE' });
+    const data = await r.json();
+    if (data.ok) {
+      errorLogList = [];
+      state.error = false;
+      state.error_msg = '';
+      document.getElementById('errorBanner')?.classList.remove('visible');
+      updateErrorAlarmBanner(false, '');
+      updateErrorStatsAndBadge();
+      renderErrorLogs();
+      toast('🗑️ 所有錯誤日誌已清空', 'info');
+    }
+  } catch (e) {
+    toast('清空錯誤日誌失敗: ' + e.message, 'error');
+  }
+}
+
+async function triggerTestError() {
+  const samples = [
+    {
+      level: 'ERROR',
+      source: 'SENSOR',
+      code: 'ERR_HALL_METAL_DROP',
+      msg: '末端 8 顆霍爾金屬感測陣列 (G1~G4) 異常：搬運途中金屬工件訊號遺失，已緊急停止！',
+      set_alarm: true
+    },
+    {
+      level: 'ERROR',
+      source: 'HARDWARE',
+      code: 'ERR_MAGNET_OVERHEAT_PROTECT',
+      msg: 'LSD-P25/20 圓形電磁鐵連續通電超過 45 秒安全上限，JQC-3FF-S-Z 繼電器強制斷電保護！',
+      set_alarm: true
+    },
+    {
+      level: 'WARN',
+      source: 'MOTION',
+      code: 'ERR_LIMIT_X_A_HIT',
+      msg: 'QN-1805-E1 接近開關觸發：X 軸 a 點左側極限已壓下，自動攔截負方向超程移動',
+      set_alarm: false
+    }
+  ];
+  const sample = samples[errorLogList.length % samples.length];
+  const r = await apiPost('/api/errors', sample);
+  if (r.ok) {
+    await loadErrorLogs();
+    toast(`🧪 已產生測試錯誤日誌：[${sample.code}]`, 'warn');
+  }
+}
+
+function copyErrorConsole() {
+  const filtered = getFilteredErrorLogs();
+  if (filtered.length === 0) {
+    toast('目前沒有可複製的錯誤日誌', 'info');
+    return;
+  }
+  const text = filtered.map(e =>
+    `#${e.id} [${e.time}] [${e.level}] [${e.source}/${e.code}] [${e.resolved ? 'RESOLVED' : 'ACTIVE'}] ${e.msg} | ${e.detail}`
+  ).join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast('📋 已複製全部錯誤日誌至剪貼簿', 'success'));
+  } else {
+    toast('📋 日誌已準備就緒', 'info');
+  }
+}
+
+function exportErrorLogs() {
+  const filtered = getFilteredErrorLogs();
+  const header = [
+    '================================================================================',
+    '  Raspberry Pi Stepper & Electromagnet Servo Controller - ERROR LOG REPORT',
+    `  Export Time : ${new Date().toLocaleString('zh-TW', { hour12: false })}`,
+    `  GPIO Mode   : ${state.gpio_mode || '-'}`,
+    `  Total Logs  : ${filtered.length}`,
+    '================================================================================',
+    ''
+  ].join('\n');
+  const body = filtered.map(e =>
+    `#${String(e.id || 0).padStart(4, '0')} | ${e.time} | ${String(e.level).padEnd(7)} | ${e.source}/${e.code}\n` +
+    `  Message  : ${e.msg}\n` +
+    `  Snapshot : ${e.detail}\n` +
+    `  Status   : ${e.resolved ? 'RESOLVED' : 'UNRESOLVED'}\n` +
+    `--------------------------------------------------------------------------------`
+  ).join('\n');
+  const blob = new Blob([header + body], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `servo_error_logs_${ts}.log`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('📥 錯誤日誌報表 (.log) 已匯出下載', 'success');
+}
+
+function initFrontendErrorCapture() {
+  window.addEventListener('error', (event) => {
+    const msg = event?.message || '前端執行期未知錯誤';
+    const detail = `${event?.filename || 'app.js'}:${event?.lineno || 0}:${event?.colno || 0}`;
+    fetch('/api/errors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        level: 'ERROR',
+        source: 'FRONTEND',
+        code: 'ERR_JS_RUNTIME',
+        msg: `前端 JS 例外: ${msg}`,
+        detail
+      })
+    }).catch(() => {});
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event?.reason?.message || String(event?.reason || 'Unhandled Promise Rejection');
+    fetch('/api/errors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        level: 'ERROR',
+        source: 'FRONTEND',
+        code: 'ERR_PROMISE_REJECTION',
+        msg: `前端非同步例外: ${reason}`,
+        detail: `URL=${window.location.pathname}`
+      })
+    }).catch(() => {});
+  });
+}
+
 

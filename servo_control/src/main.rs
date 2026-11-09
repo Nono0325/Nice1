@@ -195,6 +195,13 @@ async fn main() {
             "/api/history",
             get(api::api_get_history).delete(api::api_delete_history),
         )
+        .route(
+            "/api/errors",
+            get(api::api_get_errors)
+                .post(api::api_post_errors)
+                .delete(api::api_delete_errors),
+        )
+        .route("/api/errors/resolve", post(api::api_resolve_errors))
         .route("/api/diagnose", get(api::api_diagnose))
         .route("/api/auth/login", post(api::api_auth_login))
         .route("/api/auth/status", post(api::api_auth_status))

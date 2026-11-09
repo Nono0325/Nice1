@@ -186,9 +186,11 @@ pub async fn api_move(
     if axis == "x" {
         if let Some(d) = delta_us {
             if lim_xa && d < 0.0 {
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_A"), "X 軸 a 點左側限位開關觸發，攔截負向移動", None);
                 return Json(json!({ "ok": false, "msg": "X 軸 a 點左側限位觸發" }));
             }
             if lim_xc && d > 0.0 {
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_C"), "X 軸 c 點右側限位開關觸發，攔截正向移動", None);
                 return Json(json!({ "ok": false, "msg": "X 軸 c 點右側限位觸發" }));
             }
             ctx.x_stepper.add_target_delta(d, x_min, x_max);
@@ -198,9 +200,11 @@ pub async fn api_move(
     } else if matches!(axis.as_str(), "z" | "y" | "y1" | "y2") {
         if let Some(d) = delta_us {
             if lim_ze && d < 0.0 {
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_E"), "Z 軸 e 點下極限開關觸發，攔截向下移動", None);
                 return Json(json!({ "ok": false, "msg": "Z 軸 e 點下極限觸發" }));
             }
             if lim_zd && d > 0.0 {
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Z 軸 d 點上歸零開關觸發，攔截向上移動", None);
                 return Json(json!({ "ok": false, "msg": "Z 軸 d 點上歸零觸發" }));
             }
             ctx.z_stepper.add_target_delta(d, z_min, z_max);
@@ -1433,3 +1437,88 @@ pub async fn api_update_pull(
         Json(json!({ "ok": false, "msg": "git pull 執行失敗" })),
     )
 }
+
+// ── 錯誤日誌中心 API (/api/errors, /api/errors/resolve) ──────────────────────
+
+pub async fn api_get_errors(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let errors: Vec<_> = {
+        let buf = ctx.error_buffer.lock().unwrap();
+        buf.iter().cloned().collect()
+    };
+    let (active_error, active_error_msg) = {
+        let s = ctx.state.read().unwrap();
+        (s.error, s.error_msg.clone())
+    };
+    let total = errors.len();
+    let error_count = errors
+        .iter()
+        .filter(|e| e.level == "ERROR" || e.level == "CRITICAL")
+        .count();
+    let warn_count = errors.iter().filter(|e| e.level == "WARN").count();
+    let unresolved_count = errors.iter().filter(|e| !e.resolved).count();
+
+    Json(json!({
+        "ok": true,
+        "active_error": active_error,
+        "active_error_msg": active_error_msg,
+        "stats": {
+            "total": total,
+            "error_count": error_count,
+            "warn_count": warn_count,
+            "unresolved_count": unresolved_count
+        },
+        "errors": errors
+    }))
+}
+
+pub async fn api_post_errors(
+    State(ctx): State<Arc<AppContext>>,
+    Json(data): Json<Value>,
+) -> impl IntoResponse {
+    let level = data
+        .get("level")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ERROR");
+    let source = data.get("source").and_then(|v| v.as_str());
+    let code = data.get("code").and_then(|v| v.as_str());
+    let msg = data
+        .get("msg")
+        .and_then(|v| v.as_str())
+        .unwrap_or("未知系統錯誤");
+    let detail = data
+        .get("detail")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let set_alarm = data
+        .get("set_alarm")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if set_alarm {
+        if let Ok(mut s) = ctx.state.write() {
+            s.error = true;
+            s.error_msg = msg.to_string();
+        }
+    }
+
+    let entry = ctx.add_error_log(level, source, code, msg, detail);
+    Json(json!({
+        "ok": true,
+        "entry": entry
+    }))
+}
+
+pub async fn api_delete_errors(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    ctx.clear_errors();
+    Json(json!({ "ok": true }))
+}
+
+pub async fn api_resolve_errors(
+    State(ctx): State<Arc<AppContext>>,
+    Json(data): Json<Value>,
+) -> impl IntoResponse {
+    let target_id = data.get("id").and_then(|v| v.as_u64());
+    ctx.resolve_errors(target_id);
+    Json(json!({ "ok": true }))
+}
+

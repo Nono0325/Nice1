@@ -973,8 +973,10 @@ def api_move():
             if delta_us is not None:
                 delta_us = float(delta_us)
                 if (state.get('lim_x_a') or state.get('lim_left')) and delta_us < 0:
+                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_X_A', 'X 軸 a 點左側限位開關觸發，攔截負向移動')
                     return jsonify({'ok': False, 'msg': 'X 軸 a 點左側限位觸發'})
                 if (state.get('lim_x_c') or state.get('lim_right')) and delta_us > 0:
+                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_X_C', 'X 軸 c 點右側限位開關觸發，攔截正向移動')
                     return jsonify({'ok': False, 'msg': 'X 軸 c 點右側限位觸發'})
                 if x_stepper:
                     x_stepper.add_target_delta(delta_us, state['x_min'], state['x_max'])
@@ -990,8 +992,10 @@ def api_move():
             if delta_us is not None:
                 delta_us = float(delta_us)
                 if (state.get('lim_z_e') or state.get('lim_down')) and delta_us < 0:
+                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_Z_E', 'Z 軸 e 點下極限開關觸發，攔截向下移動')
                     return jsonify({'ok': False, 'msg': 'Z 軸 e 點下極限觸發'})
                 if (state.get('lim_z_d') or state.get('lim_up')) and delta_us > 0:
+                    add_error_log('WARN', 'MOTION', 'ERR_LIMIT_Z_D', 'Z 軸 d 點上歸零開關觸發，攔截向上移動')
                     return jsonify({'ok': False, 'msg': 'Z 軸 d 點上歸零觸發'})
                 if st_z:
                     st_z.add_target_delta(delta_us, z_min, z_max)
@@ -1003,6 +1007,7 @@ def api_move():
         return jsonify({'ok': True, 'x_pulse': state['x_pulse'],
                         'z_pulse': state['z_pulse'], 'y1_pulse': state['y1_pulse'], 'y2_pulse': state['y2_pulse']})
     except Exception as e:
+        add_error_log('ERROR', 'MOTION', 'ERR_MOVE_EXCEPTION', f'馬達移動指令例外: {e}')
         return jsonify({'ok': False, 'msg': str(e)})
 
 @app.route('/api/set_position', methods=['POST'])
@@ -1036,16 +1041,85 @@ def api_set_position():
 
     return jsonify({'ok': True})
 
-# ── 操作歷史紀錄與巨集功能 (MicroSD 卡壽命防護：記憶體環形緩衝區) ────────
+# ── 操作歷史紀錄與錯誤日誌中心 (MicroSD 卡壽命防護：記憶體環形緩衝區) ────────
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'history_log.json')
+ERROR_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'error_log.json')
 MACROS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'macros.json')
 
 history_lock = threading.Lock()
 history_buffer = deque(maxlen=250)
 history_dirty = False
 
+error_lock = threading.Lock()
+error_buffer = deque(maxlen=500)
+error_seq = 1
+
+def _classify_error_meta(msg, level='ERROR'):
+    m = str(msg).lower()
+    if any(k in m for k in ('電磁鐵', '過熱', 'gpio', '看門狗')):
+        return ('HARDWARE', 'ERR_HARDWARE_MAGNET')
+    if any(k in m for k in ('霍爾', '金屬', '接近開關', '感測')):
+        return ('SENSOR', 'ERR_SENSOR_CHECK')
+    if any(k in m for k in ('歸零', '限位', '極限', '馬達', '移動')):
+        return ('MOTION', 'ERR_MOTION_LIMIT')
+    if any(k in m for k in ('巨集', '積木', '衝壓', 'g-code', 'gcode')):
+        return ('MACRO', 'ERR_MACRO_EXEC')
+    if any(k in m for k in ('密碼', '登入', '權限', '驗證')):
+        return ('AUTH', 'ERR_AUTH_DENIED')
+    if any(k in m for k in ('更新', 'github', 'git')):
+        return ('OTA', 'ERR_OTA_UPDATE')
+    if any(k in m for k in ('前端', 'js', '連線', 'websocket')):
+        return ('FRONTEND', 'ERR_FRONTEND_RUNTIME')
+    if str(level).upper() == 'WARN':
+        return ('SYSTEM', 'WARN_SYSTEM_EVENT')
+    return ('SYSTEM', 'ERR_SYSTEM_FAULT')
+
+def _get_machine_snapshot():
+    return (
+        f"X={state.get('x_mm', 0):.1f}mm({state.get('x_pulse', 0)}µs) "
+        f"Z={state.get('z_mm', 0):.1f}mm({state.get('z_pulse', 0)}µs) | "
+        f"Run={state.get('system_run', False)} | M={state.get('magnet_active_count', 0)}/4 | "
+        f"Hall={state.get('hall_active_count', 0)}/8(G={state.get('hall_group_count', 0)}/4)"
+    )
+
+def save_error_logs():
+    with error_lock:
+        data_to_write = list(error_buffer)
+    try:
+        with open(ERROR_LOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data_to_write, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[WARN] Failed to save error_log.json: {e}")
+
+def add_error_log(level='ERROR', source=None, code=None, msg='', detail=None):
+    global error_seq
+    lvl = str(level or 'ERROR').upper()
+    auto_src, auto_code = _classify_error_meta(msg, lvl)
+    src_str = str(source or auto_src).upper()
+    code_str = str(code or auto_code).upper()
+    det_str = str(detail) if detail else _get_machine_snapshot()
+    time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with error_lock:
+        eid = error_seq
+        error_seq += 1
+        entry = {
+            'id': eid,
+            'time': time_str,
+            'level': lvl,
+            'source': src_str,
+            'code': code_str,
+            'msg': str(msg),
+            'detail': det_str,
+            'resolved': False
+        }
+        error_buffer.append(entry)
+    save_error_logs()
+    socketio.emit('new_error', entry)
+    return entry
+
 def init_history():
-    """啟動時載入歷史紀錄至記憶體緩衝區"""
+    """啟動時載入歷史紀錄與錯誤日誌至記憶體緩衝區"""
+    global error_seq
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
@@ -1055,6 +1129,41 @@ def init_history():
                         history_buffer.append(item)
         except Exception as e:
             print(f"[WARN] Failed to load history: {e}")
+
+    loaded_errors = False
+    if os.path.exists(ERROR_LOG_FILE):
+        try:
+            with open(ERROR_LOG_FILE, 'r', encoding='utf-8') as f:
+                err_entries = json.load(f)
+                if isinstance(err_entries, list) and len(err_entries) > 0:
+                    max_id = 0
+                    for item in err_entries[-500:]:
+                        error_buffer.append(item)
+                        if int(item.get('id', 0)) > max_id:
+                            max_id = int(item.get('id', 0))
+                    error_seq = max_id + 1
+                    loaded_errors = True
+        except Exception as e:
+            print(f"[WARN] Failed to load error_log.json: {e}")
+
+    # 若尚無獨立 error_log.json，從既有 history_buffer 自動匯入 error 與 warn 紀錄
+    if not loaded_errors:
+        for h in list(history_buffer):
+            htype = str(h.get('type', '')).lower()
+            if htype in ('error', 'warn'):
+                lvl = 'ERROR' if htype == 'error' else 'WARN'
+                src, code = _classify_error_meta(h.get('msg', ''), lvl)
+                error_buffer.append({
+                    'id': error_seq,
+                    'time': h.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                    'level': lvl,
+                    'source': src,
+                    'code': code,
+                    'msg': h.get('msg', ''),
+                    'detail': '歷史日誌匯入紀錄',
+                    'resolved': False
+                })
+                error_seq += 1
 
 init_history()
 
@@ -1093,6 +1202,11 @@ def add_history(msg, type='info'):
         history_dirty = True
 
     socketio.emit('new_history', log_entry)
+
+    # 若為 error 或 warn，自動同步寫入錯誤日誌中心
+    if type in ('error', 'warn'):
+        lvl = 'ERROR' if type == 'error' else 'WARN'
+        add_error_log(lvl, None, None, msg, None)
 
     # 重大錯誤 (error) 時才立即安全刷盤存檔
     if type == 'error':
@@ -1993,6 +2107,63 @@ def api_history():
     elif request.method == 'DELETE':
         save_history([])
         return jsonify({'ok': True})
+
+@app.route('/api/errors', methods=['GET', 'POST', 'DELETE'])
+def api_errors():
+    """錯誤日誌中心 API：查詢全部錯誤/警告、前端異常回報、清空錯誤紀錄"""
+    if request.method == 'GET':
+        with error_lock:
+            errs = list(error_buffer)
+        total = len(errs)
+        err_cnt = sum(1 for e in errs if e.get('level') in ('ERROR', 'CRITICAL'))
+        warn_cnt = sum(1 for e in errs if e.get('level') == 'WARN')
+        unres_cnt = sum(1 for e in errs if not e.get('resolved', False))
+        return jsonify({
+            'ok': True,
+            'active_error': bool(state.get('error', False)),
+            'active_error_msg': state.get('error_msg', ''),
+            'stats': {
+                'total': total,
+                'error_count': err_cnt,
+                'warn_count': warn_cnt,
+                'unresolved_count': unres_cnt
+            },
+            'errors': errs
+        })
+    elif request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        level = data.get('level', 'ERROR')
+        source = data.get('source')
+        code = data.get('code')
+        msg = data.get('msg', '未知系統錯誤')
+        detail = data.get('detail')
+        if data.get('set_alarm'):
+            state['error'] = True
+            state['error_msg'] = str(msg)
+        entry = add_error_log(level, source, code, msg, detail)
+        return jsonify({'ok': True, 'entry': entry})
+    elif request.method == 'DELETE':
+        with error_lock:
+            error_buffer.clear()
+        state['error'] = False
+        state['error_msg'] = ''
+        save_error_logs()
+        return jsonify({'ok': True})
+
+@app.route('/api/errors/resolve', methods=['POST'])
+def api_errors_resolve():
+    """解除當前系統錯誤警報並標記錯誤日誌為已處理"""
+    data = request.get_json(silent=True) or {}
+    target_id = data.get('id')
+    with error_lock:
+        for item in error_buffer:
+            if target_id is None or item.get('id') == target_id:
+                item['resolved'] = True
+    if target_id is None:
+        state['error'] = False
+        state['error_msg'] = ''
+    save_error_logs()
+    return jsonify({'ok': True})
 
 @app.route('/api/diagnose')
 def api_diagnose():

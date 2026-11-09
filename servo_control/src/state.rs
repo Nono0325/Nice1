@@ -295,6 +295,18 @@ pub struct HistoryEntry {
     pub log_type: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorLogEntry {
+    pub id: u64,
+    pub time: String,
+    pub level: String,
+    pub source: String,
+    pub code: String,
+    pub msg: String,
+    pub detail: String,
+    pub resolved: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
     pub password: String,
@@ -315,6 +327,9 @@ pub struct AppContext {
 
     pub history_buffer: Mutex<VecDeque<HistoryEntry>>,
     pub history_dirty: AtomicBool,
+
+    pub error_buffer: Mutex<VecDeque<ErrorLogEntry>>,
+    pub error_seq: std::sync::atomic::AtomicU64,
 
     pub homing_lock: Mutex<()>,
     pub homing_abort: AtomicBool,
@@ -351,6 +366,8 @@ impl AppContext {
             z_stepper,
             history_buffer: Mutex::new(VecDeque::with_capacity(250)),
             history_dirty: AtomicBool::new(false),
+            error_buffer: Mutex::new(VecDeque::with_capacity(500)),
+            error_seq: std::sync::atomic::AtomicU64::new(1),
             homing_lock: Mutex::new(()),
             homing_abort: AtomicBool::new(false),
             macro_running: AtomicBool::new(false),
@@ -363,6 +380,7 @@ impl AppContext {
 
         ctx.load_limits_config();
         ctx.load_history_from_disk();
+        ctx.load_errors_from_disk();
         StepperMotor::start_thread(Arc::clone(&ctx.x_stepper), Arc::clone(&ctx));
         StepperMotor::start_thread(Arc::clone(&ctx.z_stepper), Arc::clone(&ctx));
 
@@ -386,10 +404,82 @@ impl AppContext {
         }
     }
 
+    pub fn classify_error_meta(msg: &str, level: &str) -> (String, String) {
+        let m = msg.to_lowercase();
+        if m.contains("電磁鐵") || m.contains("過熱") || m.contains("gpio") || m.contains("看門狗") {
+            ("HARDWARE".to_string(), "ERR_HARDWARE_MAGNET".to_string())
+        } else if m.contains("霍爾") || m.contains("金屬") || m.contains("接近開關") || m.contains("感測") {
+            ("SENSOR".to_string(), "ERR_SENSOR_CHECK".to_string())
+        } else if m.contains("歸零") || m.contains("限位") || m.contains("極限") || m.contains("馬達") || m.contains("移動") {
+            ("MOTION".to_string(), "ERR_MOTION_LIMIT".to_string())
+        } else if m.contains("巨集") || m.contains("積木") || m.contains("衝壓") || m.contains("g-code") || m.contains("gcode") {
+            ("MACRO".to_string(), "ERR_MACRO_EXEC".to_string())
+        } else if m.contains("密碼") || m.contains("登入") || m.contains("權限") || m.contains("驗證") {
+            ("AUTH".to_string(), "ERR_AUTH_DENIED".to_string())
+        } else if m.contains("更新") || m.contains("github") || m.contains("git") {
+            ("OTA".to_string(), "ERR_OTA_UPDATE".to_string())
+        } else if m.contains("前端") || m.contains("js") || m.contains("連線") || m.contains("websocket") {
+            ("FRONTEND".to_string(), "ERR_FRONTEND_RUNTIME".to_string())
+        } else if level == "WARN" {
+            ("SYSTEM".to_string(), "WARN_SYSTEM_EVENT".to_string())
+        } else {
+            ("SYSTEM".to_string(), "ERR_SYSTEM_FAULT".to_string())
+        }
+    }
+
+    pub fn snapshot_detail(&self) -> String {
+        if let Ok(s) = self.state.read() {
+            format!(
+                "X={:.1}mm({}µs) Z={:.1}mm({}µs) | Run={} | M={}/4 | Hall={}/8(G={}/4)",
+                s.x_mm, s.x_pulse, s.z_mm, s.z_pulse, s.system_run, s.magnet_active_count, s.hall_active_count, s.hall_group_count
+            )
+        } else {
+            "Snapshot unavailable".to_string()
+        }
+    }
+
+    pub fn add_error_log(
+        &self,
+        level: &str,
+        source: Option<&str>,
+        code: Option<&str>,
+        msg: impl Into<String>,
+        detail: Option<String>,
+    ) -> ErrorLogEntry {
+        let msg_str = msg.into();
+        let lvl = level.to_uppercase();
+        let (auto_src, auto_code) = Self::classify_error_meta(&msg_str, &lvl);
+        let src_str = source.filter(|s| !s.is_empty()).unwrap_or(&auto_src).to_uppercase();
+        let code_str = code.filter(|s| !s.is_empty()).unwrap_or(&auto_code).to_uppercase();
+        let det_str = detail.filter(|d| !d.is_empty()).unwrap_or_else(|| self.snapshot_detail());
+        let id = self.error_seq.fetch_add(1, Ordering::Relaxed);
+        let entry = ErrorLogEntry {
+            id,
+            time: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            level: lvl,
+            source: src_str,
+            code: code_str,
+            msg: msg_str,
+            detail: det_str,
+            resolved: false,
+        };
+        {
+            let mut buf = self.error_buffer.lock().unwrap();
+            if buf.len() >= 500 {
+                buf.pop_front();
+            }
+            buf.push_back(entry.clone());
+        }
+        self.save_errors_to_disk();
+        self.emit_ws("new_error", serde_json::to_value(&entry).unwrap_or(Value::Null));
+        entry
+    }
+
     pub fn add_history(&self, msg: impl Into<String>, log_type: &str) {
+        let msg_str = msg.into();
         let entry = HistoryEntry {
             time: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            msg: msg.into(),
+            msg: msg_str.clone(),
             log_type: log_type.to_string(),
         };
         {
@@ -402,6 +492,11 @@ impl AppContext {
         self.history_dirty.store(true, Ordering::Relaxed);
         self.emit_ws("new_history", serde_json::to_value(&entry).unwrap_or(Value::Null));
 
+        if log_type == "error" || log_type == "warn" {
+            let lvl = if log_type == "error" { "ERROR" } else { "WARN" };
+            self.add_error_log(lvl, None, None, msg_str, None);
+        }
+
         if log_type == "error" {
             self.save_history_to_disk();
         }
@@ -409,6 +504,10 @@ impl AppContext {
 
     pub fn history_file(&self) -> PathBuf {
         self.base_dir.join("history_log.json")
+    }
+
+    pub fn errors_file(&self) -> PathBuf {
+        self.base_dir.join("error_log.json")
     }
 
     pub fn macros_file(&self) -> PathBuf {
@@ -431,6 +530,95 @@ impl AppContext {
                 }
             }
         }
+    }
+
+    pub fn load_errors_from_disk(&self) {
+        let path = self.errors_file();
+        let mut loaded = false;
+        if let Ok(content) = fs::read_to_string(path) {
+            if let Ok(entries) = serde_json::from_str::<Vec<ErrorLogEntry>>(&content) {
+                let mut buf = self.error_buffer.lock().unwrap();
+                buf.clear();
+                let mut max_id = 0u64;
+                let skip = entries.len().saturating_sub(500);
+                for item in entries.into_iter().skip(skip) {
+                    if item.id > max_id {
+                        max_id = item.id;
+                    }
+                    buf.push_back(item);
+                }
+                self.error_seq.store(max_id + 1, Ordering::Relaxed);
+                loaded = !buf.is_empty();
+            }
+        }
+        // 若尚無獨立 error_log.json，從既有 history_buffer 匯入 error / warn 紀錄
+        if !loaded {
+            let hist_items: Vec<HistoryEntry> = {
+                let h = self.history_buffer.lock().unwrap();
+                h.iter()
+                    .filter(|e| e.log_type == "error" || e.log_type == "warn")
+                    .cloned()
+                    .collect()
+            };
+            if !hist_items.is_empty() {
+                let mut buf = self.error_buffer.lock().unwrap();
+                for h in hist_items {
+                    let lvl = if h.log_type == "error" { "ERROR" } else { "WARN" };
+                    let (src, code) = Self::classify_error_meta(&h.msg, lvl);
+                    let id = self.error_seq.fetch_add(1, Ordering::Relaxed);
+                    buf.push_back(ErrorLogEntry {
+                        id,
+                        time: h.time,
+                        level: lvl.to_string(),
+                        source: src,
+                        code,
+                        msg: h.msg,
+                        detail: "歷史日誌匯入紀錄".to_string(),
+                        resolved: false,
+                    });
+                }
+            }
+        }
+    }
+
+    pub fn save_errors_to_disk(&self) {
+        let data: Vec<ErrorLogEntry> = {
+            let buf = self.error_buffer.lock().unwrap();
+            buf.iter().cloned().collect()
+        };
+        if let Ok(json_str) = serde_json::to_string_pretty(&data) {
+            let _ = fs::write(self.errors_file(), json_str);
+        }
+    }
+
+    pub fn clear_errors(&self) {
+        {
+            let mut buf = self.error_buffer.lock().unwrap();
+            buf.clear();
+        }
+        if let Ok(mut s) = self.state.write() {
+            s.error = false;
+            s.error_msg.clear();
+        }
+        self.save_errors_to_disk();
+    }
+
+    pub fn resolve_errors(&self, target_id: Option<u64>) {
+        {
+            let mut buf = self.error_buffer.lock().unwrap();
+            for item in buf.iter_mut() {
+                if target_id.is_none() || target_id == Some(item.id) {
+                    item.resolved = true;
+                }
+            }
+        }
+        if target_id.is_none() {
+            if let Ok(mut s) = self.state.write() {
+                s.error = false;
+                s.error_msg.clear();
+            }
+        }
+        self.save_errors_to_disk();
     }
 
     pub fn save_history_to_disk(&self) {

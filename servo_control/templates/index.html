@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="樹梅派伺服馬達控制系統 - 即時監控與控制 X/Y 軸伺服馬達">
   <title>伺服馬達控制系統 | Servo Motor Controller</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=1.0.6">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.0.7">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -159,6 +159,10 @@
   <button class="tab-btn" onclick="switchTab('terminal')" id="tab-terminal">
     💻 系統終端機
   </button>
+  <button class="tab-btn" onclick="switchTab('errors')" id="tab-errors" style="display:inline-flex;align-items:center;gap:6px">
+    🚨 錯誤日誌
+    <span id="tabErrorBadge" style="display:none;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:var(--accent-red);color:#fff;font-family:'JetBrains Mono',monospace">0</span>
+  </button>
 </div>
 
 <!-- ── Toast 通知 ── -->
@@ -176,7 +180,10 @@
     <div class="error-banner" id="errorBanner">
       <span>⚠️</span>
       <span id="errorMsg">系統錯誤</span>
-      <button class="btn btn-danger" style="margin-left:auto;padding:4px 12px;font-size:11px" onclick="clearError()">清除</button>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn" style="padding:4px 12px;font-size:11px;background:rgba(255,255,255,0.12);color:#fff" onclick="switchTab('errors')">📋 查看錯誤日誌</button>
+        <button class="btn btn-danger" style="padding:4px 12px;font-size:11px" onclick="clearError()">清除</button>
+      </div>
     </div>
 
     <!-- START / STOP 金屬按鈕（仿照 PPT） -->
@@ -1402,8 +1409,139 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════
+       TAB 9: 錯誤日誌中心 (Error Log Output Center)
+  ═══════════════════════════════════════════ -->
+  <div class="tab-content fade-in" id="tab-content-errors">
+
+    <!-- 1. 頂部系統警報狀態與統計卡片列 -->
+    <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1.2fr;gap:14px;margin-bottom:16px">
+      <!-- 當前警報狀態卡 -->
+      <div class="card" id="errAlarmCard" style="padding:16px;border-left:4px solid var(--accent-green);display:flex;flex-direction:column;justify-content:space-between">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:12px;color:var(--text-dim);font-weight:600">🚨 系統當前警報狀態 (SYSTEM ALARM)</span>
+          <button class="btn btn-success" id="btnResolveAlarm" onclick="resolveAllErrors()" style="padding:4px 10px;font-size:11px">✅ 解除警報並標記已讀</button>
+        </div>
+        <div id="errPageAlarmState" style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-green);margin-top:8px">
+          🟢 正常無活躍警報 (NORMAL)
+        </div>
+        <div id="errPageAlarmSub" style="font-size:11px;color:var(--text-dim);margin-top:4px">
+          監控範圍：馬達限位、電磁鐵過熱、霍爾檢知、巨集/G-code、API 與前端例外
+        </div>
+      </div>
+
+      <!-- 嚴重錯誤數 (ERROR / CRITICAL) -->
+      <div class="card" style="padding:16px;border-left:4px solid var(--accent-red)">
+        <div style="font-size:12px;color:var(--text-dim);font-weight:600">🔴 嚴重錯誤 (ERROR)</div>
+        <div id="errStatErrors" style="font-family:'Orbitron','JetBrains Mono',monospace;font-size:28px;font-weight:800;color:var(--accent-red);margin-top:6px">0</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">系統異常 / 動作中斷 / 硬體錯誤</div>
+      </div>
+
+      <!-- 警告事件數 (WARN) -->
+      <div class="card" style="padding:16px;border-left:4px solid var(--accent-amber)">
+        <div style="font-size:12px;color:var(--text-dim);font-weight:600">🟡 異常警告 (WARN)</div>
+        <div id="errStatWarns" style="font-family:'Orbitron','JetBrains Mono',monospace;font-size:28px;font-weight:800;color:var(--accent-amber);margin-top:6px">0</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">限位攔截 / 超時保護 / 權限警告</div>
+      </div>
+
+      <!-- 未處理與最新發生時間 -->
+      <div class="card" style="padding:16px;border-left:4px solid var(--accent-cyan)">
+        <div style="font-size:12px;color:var(--text-dim);font-weight:600">⏱️ 待確認筆數 / 最後發生時間</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px">
+          <span id="errStatUnresolved" style="font-family:'Orbitron','JetBrains Mono',monospace;font-size:28px;font-weight:800;color:var(--accent-cyan)">0</span>
+          <span style="font-size:12px;color:var(--text-sec)">筆未讀</span>
+        </div>
+        <div id="errStatLastTime" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);margin-top:4px">最後記錄：尚無紀錄</div>
+      </div>
+    </div>
+
+    <!-- 2. 篩選器、搜尋與操作控制列 -->
+    <div class="card" style="padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+        <!-- 左側：等級篩選晶片 + 模組選擇 -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <span style="font-size:12px;color:var(--text-dim);font-weight:600">篩選等級：</span>
+          <button class="step-chip active" id="errFilterBtn-ALL" onclick="setErrorLevelFilter('ALL')">全部 (<span id="errCountAll">0</span>)</button>
+          <button class="step-chip" id="errFilterBtn-ERROR" onclick="setErrorLevelFilter('ERROR')" style="border-color:rgba(239,68,68,0.45);color:#fca5a5">🔴 僅錯誤 ERROR</button>
+          <button class="step-chip" id="errFilterBtn-WARN" onclick="setErrorLevelFilter('WARN')" style="border-color:rgba(251,191,36,0.45);color:#fde68a">🟡 僅警告 WARN</button>
+          <button class="step-chip" id="errFilterBtn-UNRESOLVED" onclick="setErrorLevelFilter('UNRESOLVED')">❗ 未處理</button>
+
+          <select id="errSourceFilter" onchange="renderErrorLogs()" style="padding:6px 10px;border-radius:6px;background:#060a10;border:1px solid var(--border);color:var(--text-main);font-size:12px;margin-left:4px">
+            <option value="ALL">全部來源模組 (ALL MODULES)</option>
+            <option value="MOTION">MOTION (馬達 / 歸零 / 限位)</option>
+            <option value="HARDWARE">HARDWARE (電磁鐵 / GPIO / 看門狗)</option>
+            <option value="SENSOR">SENSOR (霍爾開關 / 接近開關)</option>
+            <option value="MACRO">MACRO (積木 / 巨集 / 衝壓循環)</option>
+            <option value="API">API (後端控制介面)</option>
+            <option value="FRONTEND">FRONTEND (網頁前端 / JS / 連線)</option>
+            <option value="AUTH">AUTH (登入驗證 / 安全權限)</option>
+            <option value="OTA">OTA (GitHub 版本更新)</option>
+            <option value="SYSTEM">SYSTEM (系統核心事件)</option>
+          </select>
+
+          <input type="text" id="errSearchInput" oninput="renderErrorLogs()" placeholder="🔍 搜尋錯誤訊息、錯誤碼、時間或座標..."
+            style="padding:6px 12px;border-radius:6px;background:#060a10;border:1px solid var(--border);color:var(--text-main);font-size:12px;width:240px">
+        </div>
+
+        <!-- 右側：操作按鈕 -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadErrorLogs()">🔄 重新整理</button>
+          <button class="btn btn-warning" style="padding:6px 12px;font-size:12px" onclick="triggerTestError()">🧪 模擬測試錯誤</button>
+          <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="exportErrorLogs()">📥 匯出 .log 日誌</button>
+          <button class="btn btn-danger" style="padding:6px 12px;font-size:12px" onclick="clearAllErrorLogs()">🗑️ 清空錯誤日誌</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 即時 Error Console 錯誤日誌輸出串流視窗 (Terminal Output View) -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="justify-content:space-between">
+        <span><span class="icon">🖥️</span>即時 Error 日誌輸出終端機 (Live Error Stream Console)</span>
+        <div style="display:flex;gap:12px;align-items:center">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-sec);cursor:pointer;font-weight:normal">
+            <input type="checkbox" id="errAutoScroll" checked style="accent-color:var(--accent-cyan)">
+            自動捲動至最新輸出
+          </label>
+          <button class="btn" style="padding:4px 10px;font-size:11px" onclick="copyErrorConsole()">📋 複製全部日誌輸出</button>
+        </div>
+      </div>
+      <div id="errorConsoleStream" style="width:100%;height:250px;background:#030712;border:1px solid var(--border);border-radius:8px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.65;color:#e2e8f0;overflow-y:auto;box-shadow:inset 0 0 12px rgba(0,0,0,0.85)">
+        <div style="color:var(--text-dim)">[SYSTEM] 錯誤日誌串流監控已就緒，正在載入所有 Error / Warn 輸出紀錄...</div>
+      </div>
+    </div>
+
+    <!-- 4. 結構化錯誤日誌明細表格 -->
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span><span class="icon">📋</span>錯誤與異常事件明細列表 (Structured Error Log Table)</span>
+        <span id="errTableSummary" style="font-size:12px;color:var(--text-dim);font-weight:normal">共 0 筆紀錄</span>
+      </div>
+      <div style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+        <table class="diag-table" style="width:100%;border-collapse:collapse">
+          <thead style="position:sticky;top:0;background:#0f172a;z-index:2">
+            <tr>
+              <th style="width:60px">#ID</th>
+              <th style="width:155px">發生時間</th>
+              <th style="width:90px">等級</th>
+              <th style="width:190px">來源模組 / 錯誤碼</th>
+              <th>錯誤訊息與異常原因</th>
+              <th style="width:270px">當下機台狀態快照 (Snapshot)</th>
+              <th style="width:95px;text-align:center">狀態</th>
+            </tr>
+          </thead>
+          <tbody id="errorLogTableBody">
+            <tr>
+              <td colspan="7" style="text-align:center;color:var(--text-dim);padding:28px">目前尚無符合條件的錯誤日誌紀錄</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
 </div><!-- end main-container -->
 
-<script src="/static/js/app.js?v=2.0.2"></script>
+<script src="/static/js/app.js?v=2.0.3"></script>
 </body>
 </html>

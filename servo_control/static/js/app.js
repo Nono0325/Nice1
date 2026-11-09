@@ -71,9 +71,9 @@ function createRustSocket() {
         trigger('disconnect');
       }
       wsFailCount++;
-      if (wsFailCount >= 3 && typeof window.io === 'function' && !sio) {
+      if (wsFailCount >= 1 && typeof window.io === 'function' && !sio) {
         initSocketIoFallback();
-      } else {
+      } else if (!sio) {
         scheduleReconnect();
       }
     };
@@ -490,6 +490,7 @@ function updateUI() {
   // Z 軸位置軌跡與數值 (原 Y 軸改為 Z 軸)
   const zPulse = s.z_pulse !== undefined ? s.z_pulse : s.y1_pulse;
   const zPct = Math.max(0, Math.min(100, s.z_pct !== undefined ? s.z_pct : (s.y_pct || 0)));
+  const yPct = zPct;
   setEl('yBar', el => el.style.width = `${zPct}%`);
   setEl('yPctDisplay', el => el.textContent = `${zPct.toFixed(1)}%`);
   setEl('y1PulseDisplay', el => el.textContent = `${zPulse} µs`);

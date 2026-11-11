@@ -76,24 +76,55 @@ fi
 
 log_step "3/6 下載 / 同步 Git 倉庫 (${REPO_URL})"
 
+# 設定 safe.directory 避免 sudo/root 與一般使用者不同身分觸發 dubious ownership
+git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+git config --global --add safe.directory "${RUN_HOME}/Nice" 2>/dev/null || true
+git config --global --add safe.directory "*" 2>/dev/null || true
+
+if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
+    su - "$RUN_USER" -c "git config --global --add safe.directory '*' 2>/dev/null || true" 2>/dev/null || true
+    if [ -d "$REPO_DIR" ]; then
+        chown -R "${RUN_USER}:${RUN_USER}" "$REPO_DIR" 2>/dev/null || true
+    fi
+    if [ -d "${RUN_HOME}/Nice" ]; then
+        chown -R "${RUN_USER}:${RUN_USER}" "${RUN_HOME}/Nice" 2>/dev/null || true
+    fi
+fi
+
 if [ -d "$REPO_DIR/.git" ]; then
-    log_info "已存在 Git 倉庫，正在拉取最新版本: ${REPO_DIR}"
+    log_info "已存在 Git 倉庫，正在同步最新版本: ${REPO_DIR}"
     cd "$REPO_DIR"
-    git fetch origin "$REPO_BRANCH" --quiet 2>/dev/null || true
-    git reset --hard "origin/$REPO_BRANCH" --quiet 2>/dev/null || git pull origin "$REPO_BRANCH" --quiet 2>/dev/null || true
-    log_ok "倉庫已同步至最新 Commit"
+    if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
+        su - "$RUN_USER" -c "cd '${REPO_DIR}' && git fetch origin '${REPO_BRANCH}' && git reset --hard 'origin/${REPO_BRANCH}'"
+    else
+        git fetch origin "$REPO_BRANCH"
+        git reset --hard "origin/$REPO_BRANCH"
+    fi
+    CURRENT_COMMIT=$(git log -1 --format="%h (%s)" 2>/dev/null || echo "Unknown")
+    log_ok "倉庫已同步至最新 Commit: ${CURRENT_COMMIT}"
 elif [ -d "${RUN_HOME}/Nice/.git" ]; then
     REPO_DIR="${RUN_HOME}/Nice"
     INSTALL_DIR="${REPO_DIR}/servo_control"
     log_info "偵測到既有倉庫目錄: ${REPO_DIR}"
     cd "$REPO_DIR"
-    git fetch origin "$REPO_BRANCH" --quiet 2>/dev/null || true
-    git reset --hard "origin/$REPO_BRANCH" --quiet 2>/dev/null || true
+    if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
+        su - "$RUN_USER" -c "cd '${REPO_DIR}' && git fetch origin '${REPO_BRANCH}' && git reset --hard 'origin/${REPO_BRANCH}'"
+    else
+        git fetch origin "$REPO_BRANCH"
+        git reset --hard "origin/$REPO_BRANCH"
+    fi
+    CURRENT_COMMIT=$(git log -1 --format="%h (%s)" 2>/dev/null || echo "Unknown")
+    log_ok "倉庫已同步至最新 Commit: ${CURRENT_COMMIT}"
 else
     log_info "開始 Clone 倉庫至: ${REPO_DIR}"
     mkdir -p "$REPO_DIR"
-    git clone --branch "$REPO_BRANCH" --depth=1 "$REPO_URL" "$REPO_DIR"
-    log_ok "倉庫下載成功"
+    if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
+        su - "$RUN_USER" -c "git clone --branch '${REPO_BRANCH}' --depth=1 '${REPO_URL}' '${REPO_DIR}'"
+    else
+        git clone --branch "$REPO_BRANCH" --depth=1 "$REPO_URL" "$REPO_DIR"
+    fi
+    CURRENT_COMMIT=$(cd "$REPO_DIR" && git log -1 --format="%h (%s)" 2>/dev/null || echo "Unknown")
+    log_ok "倉庫下載成功，當前 Commit: ${CURRENT_COMMIT}"
 fi
 
 cd "$INSTALL_DIR"
@@ -124,10 +155,18 @@ if [ "$EUID" -eq 0 ]; then
 fi
 
 log_info "開始編譯 Release 最佳化執行檔 (初次編譯約需 2~4 分鐘)..."
-if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ] && [ -x "${RUN_HOME}/.cargo/bin/cargo" ]; then
-    su - "$RUN_USER" -c "cd '${INSTALL_DIR}' && '${RUN_HOME}/.cargo/bin/cargo' build --release"
+CARGO_CMD="${RUN_HOME}/.cargo/bin/cargo"
+if [ ! -x "$CARGO_CMD" ]; then
+    CARGO_CMD=$(command -v cargo || echo "cargo")
+fi
+CARGO_VER=$($CARGO_CMD --version 2>/dev/null || echo "Unknown")
+log_info "編譯環境: ${CARGO_VER} (編譯路徑: ${INSTALL_DIR})"
+
+if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
+    su - "$RUN_USER" -c "cd '${INSTALL_DIR}' && '$CARGO_CMD' build --release"
 else
-    cargo build --release
+    cd "${INSTALL_DIR}"
+    $CARGO_CMD build --release
 fi
 
 chmod +x "$INSTALL_DIR/target/release/servo_control" 2>/dev/null || true

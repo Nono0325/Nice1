@@ -142,12 +142,12 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
         }
         ctx.x_stepper.add_target_delta(delta, 0.0, x_max);
     } else if matches!(axis.as_str(), "z" | "y" | "y1" | "y2") {
-        if (hw_lim_zd || hw_lim_ze) && delta < 0.0 {
+        if hw_lim_zd && delta < 0.0 {
             ctx.z_stepper.halt();
             ctx.z_stepper.set_position(0.0);
             return;
         }
-        if hw_lim_zd && delta > 0.0 {
+        if hw_lim_ze && delta > 0.0 {
             ctx.z_stepper.halt();
             return;
         }
@@ -229,23 +229,27 @@ pub async fn api_move(
         }
     } else if matches!(axis.as_str(), "z" | "y" | "y1" | "y2") {
         if let Some(d) = delta_mm {
-            if (hw_lim_zd || hw_lim_ze) && d < 0.0 {
+            if hw_lim_zd && d < 0.0 {
                 ctx.z_stepper.halt();
                 ctx.z_stepper.set_position(0.0);
-                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Z 軸原點霍爾/限位開關觸發，坐標歸零並攔截向後移動", None);
-                return Json(json!({ "ok": false, "msg": "Z 軸原點限位觸發，已歸零並禁止繼續向後移動" }));
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Y/Z 軸頂部原點霍爾/限位開關觸發，坐標歸零並攔截向上移動", None);
+                return Json(json!({ "ok": false, "msg": "Y/Z 軸頂部原點限位觸發，已歸零並禁止繼續向上移動" }));
             }
-            if hw_lim_zd && d > 0.0 {
+            if hw_lim_ze && d > 0.0 {
                 ctx.z_stepper.halt();
-                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_D"), "Z 軸上極限觸發，攔截正向移動", None);
-                return Json(json!({ "ok": false, "msg": "Z 軸限位觸發" }));
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_Z_E"), "Y/Z 軸底部下極限觸發，攔截向下移動", None);
+                return Json(json!({ "ok": false, "msg": "Y/Z 軸底部下極限觸發" }));
             }
             ctx.z_stepper.add_target_delta(d, z_min_mm, z_max_mm);
         } else if let Some(t) = target_mm {
-            if (hw_lim_zd || hw_lim_ze) && t <= 0.0 {
+            if hw_lim_zd && t <= 0.0 {
                 ctx.z_stepper.halt();
                 ctx.z_stepper.set_position(0.0);
-                return Json(json!({ "ok": false, "msg": "Z 軸已在原點，禁止繼續向後移動" }));
+                return Json(json!({ "ok": false, "msg": "Y/Z 軸已在頂部原點，禁止繼續向上移動" }));
+            }
+            if hw_lim_ze && t >= z_max_mm {
+                ctx.z_stepper.halt();
+                return Json(json!({ "ok": false, "msg": "Y/Z 軸已在底部極限，禁止繼續向下移動" }));
             }
             ctx.z_stepper.set_target(t, z_min_mm, z_max_mm);
         }

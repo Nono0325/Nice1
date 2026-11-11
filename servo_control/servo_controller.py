@@ -632,10 +632,14 @@ def read_limit_switches():
         # 當任一組完整觸發 (或有霍爾感應到金屬) 時，判定金屬在位
         state['hall_arm_metal'] = bool(state['hall_group_count'] > 0 or state['hall_active_count'] > 0)
 
-        # 同步舊有名稱鏡像
+        # X 軸原點（左側）：霍爾模組 (HALL_1 / HALL_2 / Group 1) 或 LIM_X_A
+        state['lim_x_a'] = bool(state['lim_x_a'] or state['hall_1'] or state['hall_2'] or state['hall_group_1'])
         state['lim_left'] = state['lim_x_a']
         state['lim_mid'] = state['lim_x_b']
         state['lim_right'] = state['lim_x_c']
+
+        # Y/Z 軸頂部原點（向上）：霍爾模組 (HALL_3 / HALL_4 / Group 2) 或 LIM_Z_D
+        state['lim_z_d'] = bool(state['lim_z_d'] or state['hall_3'] or state['hall_4'] or state['hall_group_2'])
         state['lim_up'] = state['lim_z_d']
         state['lim_down'] = state['lim_z_e']
         state['hall_metal'] = state['hall_arm_metal']
@@ -690,15 +694,24 @@ def _execute_hardware_homing(target_axes):
             'timed_out': False
         })
 
-    # ── 階段 A: 預先檢查 - 若原先已壓在接近開關或霍爾開關上，先慢速退開 ────
+    # ── 階段 A: 預先檢查 - 若原先已壓在接近開關或霍爾模組上，先慢速退開 ────
     for cfg in axis_configs:
-        is_sensor_active = not GPIO.input(cfg['lim_pin']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+        if cfg['name'] == 'x':
+            is_sensor_active = not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
+        else:
+            is_sensor_active = not GPIO.input(PIN['HALL_3']) or not GPIO.input(PIN['HALL_4']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
         if is_sensor_active:
             add_history(f"{cfg['name'].upper()} 軸感測器處於觸發狀態，執行預先退開...", "info")
             GPIO.output(cfg['dir_pin'], cfg['backoff_dir'])
             pre_step_interval = 1.0 / 250.0
             pre_steps = 0
-            while (not GPIO.input(cfg['lim_pin']) or not GPIO.input(PIN['HALL_1'])) and pre_steps < 3000:
+            while pre_steps < 3000:
+                if cfg['name'] == 'x':
+                    hit = not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
+                else:
+                    hit = not GPIO.input(PIN['HALL_3']) or not GPIO.input(PIN['HALL_4']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
+                if not hit:
+                    break
                 if homing_abort_event.is_set():
                     add_history("歸零程序被中止（緊急停止）", "warn")
                     return
@@ -736,13 +749,16 @@ def _execute_hardware_homing(target_axes):
 
         for cfg in axis_configs:
             if not cfg['triggered']:
-                pin_low = not GPIO.input(cfg['lim_pin']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+                if cfg['name'] == 'x':
+                    pin_low = not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
+                else:
+                    pin_low = not GPIO.input(PIN['HALL_3']) or not GPIO.input(PIN['HALL_4']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
                 if pin_low:
                     cfg['triggered'] = True
                     cfg['sensor_hit'] = True
                     cfg['stepper'].set_position(0.0)
                     state[cfg['state_key']] = True
-                    add_history(f"{cfg['name'].upper()} 軸平穩觸發現位接近開關/霍爾開關，捕獲原點！", "info")
+                    add_history(f"{cfg['name'].upper()} 軸碰觸霍爾模組原點，捕獲原點 (0.0 mm)！", "info")
                 else:
                     GPIO.output(cfg['pul_pin'], GPIO.HIGH)
                     active_pulse.append(cfg)

@@ -408,9 +408,10 @@ impl StepperMotor {
                             }
                         } else {
                             if motor.gpio.is_pin_active_low_debounced(22)
+                                || motor.gpio.is_pin_active_low_debounced(8)
+                                || motor.gpio.is_pin_active_low_debounced(9)
                                 || motor.gpio.is_pin_active_low_debounced(6)
                                 || motor.gpio.is_pin_active_low_debounced(7)
-                                || motor.gpio.is_pin_active_low_debounced(8)
                             {
                                 hit_limit_stop = true;
                                 break;
@@ -601,16 +602,19 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
     }
 
     let check_sensor = |cfg: &HomingCfg| -> bool {
-        let lim_hit = ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin);
-        let hall_hit = if cfg.name == "x" {
-            ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7)
-        } else {
+        if cfg.name == "x" {
+            // X 軸向左歸零：優先檢測 X 軸霍爾模組 (GPIO 6 / GPIO 7)，兼容接近開關 (GPIO 17)
             ctx.gpio.is_pin_active_low_debounced(6)
                 || ctx.gpio.is_pin_active_low_debounced(7)
-                || ctx.gpio.is_pin_active_low_debounced(8)
+                || ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin)
+        } else {
+            // Y 軸向上歸零：優先檢測 Y 軸霍爾模組 (GPIO 8 / GPIO 9 或 6/7)，兼容接近開關 (GPIO 22)
+            ctx.gpio.is_pin_active_low_debounced(8)
                 || ctx.gpio.is_pin_active_low_debounced(9)
-        };
-        lim_hit || hall_hit
+                || ctx.gpio.is_pin_active_low_debounced(6)
+                || ctx.gpio.is_pin_active_low_debounced(7)
+                || ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin)
+        }
     };
 
     // ── 階段 0: 若開關已被觸發（或已在原點），先向正方向安全退開 ──
@@ -746,15 +750,15 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         {
             let mut s = ctx.state.write().unwrap();
             if cfg.name == "x" {
-                s.lim_x_a = false;
-                s.lim_left = false;
+                s.lim_x_a = true;
+                s.lim_left = true;
                 s.x_pulse = 0;
                 s.x_mm = 0.0;
                 s.x_pct = 0.0;
                 s.x_homed = true;
             } else {
-                s.lim_z_d = false;
-                s.lim_up = false;
+                s.lim_z_d = true;
+                s.lim_up = true;
                 s.z_pulse = 0;
                 s.z_mm = 0.0;
                 s.z_pct = 0.0;
@@ -766,7 +770,7 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
             }
         }
         ctx.add_history(
-            format!("{} 軸兩段式精密歸零完成 (物理原點鎖定：0.0 mm / 0 µs)", cfg.name.to_uppercase()),
+            format!("{} 軸霍爾模組兩段式精密歸零完成 (物理原點鎖定：0.0 mm / 0 µs)", cfg.name.to_uppercase()),
             "success",
         );
     }

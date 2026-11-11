@@ -975,10 +975,19 @@ impl AppContext {
             .count();
         s.hall_arm_metal = s.hall_group_count > 0 || s.hall_active_count > 0;
 
+        // X 軸左側原點：實體霍爾模組 (HALL_1 GPIO 6 / HALL_2 GPIO 7) 或接近開關 LIM_X_A (GPIO 17)
+        let hall_x_origin = s.hall_1 || s.hall_2 || s.hall_group_1;
+        s.lim_x_a = s.lim_x_a || hall_x_origin;
         s.lim_left = s.lim_x_a;
+
         s.lim_mid = s.lim_x_b;
         s.lim_right = s.lim_x_c;
+
+        // Y 軸（Z 軸）向上原點：實體霍爾模組 (HALL_3 GPIO 8 / HALL_4 GPIO 9) 或接近開關 LIM_Z_D (GPIO 22)
+        let hall_z_origin = s.hall_3 || s.hall_4 || s.hall_group_2;
+        s.lim_z_d = s.lim_z_d || hall_z_origin;
         s.lim_up = s.lim_z_d;
+
         s.lim_down = s.lim_z_e;
         s.hall_metal = s.hall_arm_metal;
     }

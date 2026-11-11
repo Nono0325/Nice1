@@ -70,16 +70,24 @@ fn spawn_broadcast_loop(ctx: Arc<AppContext>) {
                 s.z_pct = (((z_clamped_mm - z_min_mm) / (z_max_mm - z_min_mm)) * 100.0).clamp(0.0, 100.0);
                 s.z_pulse = (z_clamped_mm * s.z_steps_per_mm).round() as i64;
 
-                // 若原點霍爾/限位處於觸發狀態或已完成歸零，強制定錨於 0 原點坐標
-                if (s.lim_x_a || s.lim_left) && x_clamped_mm <= x_min_mm + 1.0 {
+                // 若原點霍爾/限位處於觸發狀態或已完成歸零，強制定錨於 0 原點坐標並同步重設馬達坐標
+                if s.lim_x_a || s.lim_left {
                     s.x_pulse = 0;
                     s.x_mm = 0.0;
                     s.x_pct = 0.0;
+                    s.x_homed = true;
+                    if x_pos > 0.05 && !s.is_homing {
+                        ctx.x_stepper.set_position(0.0);
+                    }
                 }
-                if (s.lim_z_d || s.lim_up) && z_clamped_mm <= z_min_mm + 1.0 {
+                if s.lim_z_d || s.lim_up {
                     s.z_pulse = 0;
                     s.z_mm = 0.0;
                     s.z_pct = 0.0;
+                    s.z_homed = true;
+                    if z_pos > 0.05 && !s.is_homing {
+                        ctx.z_stepper.set_position(0.0);
+                    }
                 }
 
                 s.y1_pulse = s.z_pulse;

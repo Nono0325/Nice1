@@ -835,13 +835,19 @@ async function cmdPickup() {
 async function moveAxis(axis, dir) {
   if (!state.system_run) { toast('系統未啟動，請先按下 START', 'error'); return; }
   
-  // 前端防撞第一道防線：若原點/霍爾感測器觸發，禁止繼續向後移動
-  if (axis === 'x' && dir < 0 && (state.lim_x_a || state.lim_left)) {
-    toast('X 軸原點霍爾/接近開關觸發中，禁止繼續向後移動！', 'warn');
+  // 前端防撞第一道防線：若原點/霍爾感測器觸發，禁止繼續向原點後方移動
+  const hallXHit = !!(state.lim_x_a || state.lim_left || state.hall_1 || state.hall_2 || state.hall_group_1);
+  const hallZHit = !!(state.lim_z_d || state.lim_up || state.hall_3 || state.hall_4 || state.hall_group_2);
+  if (axis === 'x' && dir < 0 && hallXHit) {
+    toast('X 軸左側霍爾模組觸發中（已在原點），禁止繼續向左移動！', 'warn');
     return;
   }
-  if (axis === 'z' && dir < 0 && (state.lim_z_d || state.lim_up || state.lim_z_e || state.lim_down)) {
-    toast('Z 軸原點霍爾/限位開關觸發中，禁止繼續向後移動！', 'warn');
+  if (axis === 'z' && dir < 0 && hallZHit) {
+    toast('Y/Z 軸頂部霍爾模組觸發中（已在原點），禁止繼續向上移動！', 'warn');
+    return;
+  }
+  if (axis === 'z' && dir > 0 && (state.lim_z_e || state.lim_down)) {
+    toast('Y/Z 軸底部限位觸發中，禁止繼續向下移動！', 'warn');
     return;
   }
 
@@ -2925,8 +2931,8 @@ document.addEventListener('keydown', (e) => {
   switch (e.key) {
     case 'ArrowLeft':  e.preventDefault(); moveAxis('x', -1); break;
     case 'ArrowRight': e.preventDefault(); moveAxis('x',  1); break;
-    case 'ArrowUp':    e.preventDefault(); moveAxis('z',  1); break;
-    case 'ArrowDown':  e.preventDefault(); moveAxis('z', -1); break;
+    case 'ArrowUp':    e.preventDefault(); moveAxis('z', -1); break; // 向上往頂部霍爾原點
+    case 'ArrowDown':  e.preventDefault(); moveAxis('z',  1); break; // 向下往取放深度
     case 'm': case 'M':
     case 'v': case 'V': toggleVacuum(); break;
     case 'z': case 'Z': toggleZDown(); break;

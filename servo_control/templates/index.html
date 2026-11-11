@@ -347,7 +347,7 @@
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-sec)">
-        <span id="yTick0">e點 (0 mm)</span><span id="yTick1">50 mm</span><span id="yTick2">50% (100 mm)</span><span id="yTick3">150 mm</span><span id="yTick4">d點 (200 mm)</span>
+        <span id="yTick0">d點 (0 mm 頂部原點)</span><span id="yTick1">50 mm</span><span id="yTick2">50% (100 mm)</span><span id="yTick3">150 mm</span><span id="yTick4">e點 (200 mm 下降取放)</span>
       </div>
     </div>
 
@@ -396,8 +396,8 @@
             <div style="font-size:13px;color:var(--text-sec);margin-top:6px">當前 Z 座標</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:12px">
-            <button class="step-btn large" onclick="moveAxis('z',1)" title="上移 (往 d 點安全高度)">▲</button>
-            <button class="step-btn large" onclick="moveAxis('z',-1)" title="下移 (往 e 點取放深度)">▼</button>
+            <button class="step-btn large" onclick="moveAxis('z',-1)" title="上移 (往 d 點頂部霍爾原點)">▲</button>
+            <button class="step-btn large" onclick="moveAxis('z',1)" title="下移 (往 e 點取放深度)">▼</button>
           </div>
           <div style="text-align:center">
             <div class="value-display large-text" id="yPulseVal">1500 µs</div>

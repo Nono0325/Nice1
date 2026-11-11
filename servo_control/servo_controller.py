@@ -2133,9 +2133,13 @@ def load_limits_config():
 load_limits_config()
 
 @app.route('/api/set_limits', methods=['POST'])
+@app.route('/api/settings', methods=['POST'])
 def api_set_limits():
     """設定馬達行程範圍（支援 mm 與 us）、速度與校準參數"""
     data = request.get_json(silent=True) or {}
+
+    if 'hall_active_high' in data:
+        state['hall_active_high'] = bool(data['hall_active_high'])
     
     # 優先更新比例參數（避免換算 mm 極限時使用舊 scale 或被 0 除）
     if 'x_scale' in data: 

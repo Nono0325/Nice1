@@ -822,11 +822,15 @@ async function cmdStop() {
 async function toggleHallPolarity() {
   const currentHigh = !!state.hall_active_high;
   const nextHigh = !currentHigh;
-  const r = await apiPost('/api/settings', { hall_active_high: nextHigh });
+  let r = await apiPost('/api/set_limits', { hall_active_high: nextHigh });
+  if (!r || !r.ok) {
+    r = await apiPost('/api/settings', { hall_active_high: nextHigh });
+  }
   if (r && r.ok) {
     state.hall_active_high = nextHigh;
-    toast(`霍爾模組極性已切換為：${nextHigh ? 'Active-HIGH (高電平觸發)' : 'Active-LOW (低電平觸發)'}`, 'success');
+    toast(`霍爾模組極性已切換為：${nextHigh ? 'Active-HIGH (3.3V 高電平觸發)' : 'Active-LOW (0V 低電平觸發)'}`, 'success');
     addLog(`切換霍爾極性: ${nextHigh ? 'HIGH' : 'LOW'}`, 'info');
+    updateUI();
   }
 }
 
@@ -1193,7 +1197,15 @@ async function apiPost(url, body = {}) {
       headers,
       body: JSON.stringify(payload)
     });
-    return await r.json();
+    const text = await r.text();
+    if (!text || text.trim() === '') {
+      return { ok: r.ok };
+    }
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return { ok: r.ok, msg: text };
+    }
   } catch (e) {
     addLog(`API 錯誤: ${url} - ${e.message}`, 'error');
     return { ok: false, msg: e.message };

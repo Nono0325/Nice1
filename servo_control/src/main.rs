@@ -212,6 +212,7 @@ async fn main() {
         .route("/api/continuous_mode", post(api::api_continuous_mode))
         .route("/api/reset_cycle_count", post(api::api_reset_cycle_count))
         .route("/api/set_limits", post(api::api_set_limits))
+        .route("/api/settings", post(api::api_set_limits))
         .route("/api/set_motor_enable", post(api::api_set_motor_enable))
         .route(
             "/api/macros",

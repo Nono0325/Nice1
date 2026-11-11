@@ -575,8 +575,20 @@ function updateUI() {
     const mOn = s[`magnet_${g}`] !== undefined ? s[`magnet_${g}`] : (s.magnet || s.vacuum);
     updateTag(`mon-mag-${g}`, !!mOn, `🟢 通電 ON`, `⚫ OFF`, 'tag-green', 'tag-red');
   }
+  const rawLevels = s.raw_hall_levels || [];
   for (let i = 1; i <= 8; i++) {
-    updateTag(`mon-hall-${i}`, !!s[`hall_${i}`], `H${i}: 🟢 觸發`, `H${i}: ⚪ OFF`, 'tag-green', 'tag-blue');
+    const rawBit = rawLevels.length >= i ? ` (Pin=${rawLevels[i - 1]})` : '';
+    updateTag(`mon-hall-${i}`, !!s[`hall_${i}`], `H${i}: 🟢 觸發${rawBit}`, `H${i}: ⚪ OFF${rawBit}`, 'tag-green', 'tag-blue');
+  }
+  const polEl = document.getElementById('tagHallPolarity');
+  if (polEl) {
+    if (s.hall_active_high) {
+      polEl.className = 'tag tag-amber';
+      polEl.textContent = 'Active-HIGH (3.3V 高電平觸發)';
+    } else {
+      polEl.className = 'tag tag-blue';
+      polEl.textContent = 'Active-LOW (0V 低電平觸發)';
+    }
   }
   for (let g = 1; g <= 4; g++) {
     const hA = !!s[`hall_${g * 2 - 1}`];
@@ -805,6 +817,17 @@ async function cmdStop() {
   const r = await apiPost('/api/stop');
   if (r.ok) toast('系統已停止', 'info');
   addLog('系統停止', 'warn');
+}
+
+async function toggleHallPolarity() {
+  const currentHigh = !!state.hall_active_high;
+  const nextHigh = !currentHigh;
+  const r = await apiPost('/api/settings', { hall_active_high: nextHigh });
+  if (r && r.ok) {
+    state.hall_active_high = nextHigh;
+    toast(`霍爾模組極性已切換為：${nextHigh ? 'Active-HIGH (高電平觸發)' : 'Active-LOW (低電平觸發)'}`, 'success');
+    addLog(`切換霍爾極性: ${nextHigh ? 'HIGH' : 'LOW'}`, 'info');
+  }
 }
 
 async function cmdHome(axis) {

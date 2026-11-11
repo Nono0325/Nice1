@@ -749,11 +749,18 @@ def _execute_hardware_homing(target_axes):
 
         for cfg in axis_configs:
             if not cfg['triggered']:
-                if cfg['name'] == 'x':
-                    pin_low = not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
-                else:
-                    pin_low = not GPIO.input(PIN['HALL_3']) or not GPIO.input(PIN['HALL_4']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(cfg['lim_pin'])
-                if pin_low:
+                ah = bool(state.get('hall_active_high', False))
+                hall_hit = False
+                target_hall_pins = ['HALL_1', 'HALL_2', 'HALL_5', 'HALL_7', 'HALL_3', 'HALL_4', 'HALL_6', 'HALL_8']
+                for p_name in target_hall_pins:
+                    p = PIN.get(p_name)
+                    if p is not None:
+                        val = bool(GPIO.input(p))
+                        if val if ah else (not val):
+                            hall_hit = True
+                            break
+                pin_triggered = (not GPIO.input(cfg['lim_pin'])) or hall_hit
+                if pin_triggered:
                     cfg['triggered'] = True
                     cfg['sensor_hit'] = True
                     cfg['stepper'].set_position(0.0)

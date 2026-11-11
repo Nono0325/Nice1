@@ -115,6 +115,8 @@ pub struct SystemState {
     pub hall_active_count: usize,
     pub hall_group_count: usize,
     pub hall_arm_metal: bool,
+    pub hall_active_high: bool,
+    pub raw_hall_levels: Vec<u8>,
     pub press_done: bool,
 
     pub lim_left: bool,
@@ -227,6 +229,8 @@ impl SystemState {
             hall_active_count: 0,
             hall_group_count: 0,
             hall_arm_metal: false,
+            hall_active_high: false,
+            raw_hall_levels: vec![0; 8],
             press_done: false,
             lim_left: false,
             lim_mid: false,
@@ -908,11 +912,20 @@ impl AppContext {
                 6, 7, 8, 9, 10, 11, 4, 21, // HALL_1..8
                 5, // PRESS_DONE
             ];
+            let active_high = self.state.read().unwrap().hall_active_high;
+            let mut raw_levels = [false; 14];
             let mut counts = [0u8; 14];
             for sample in 0..3 {
                 for (i, &pin) in pins.iter().enumerate() {
-                    // NPN 常開與 817 光耦在觸發時拉低為 LOW (false)
-                    if !self.gpio.read_pin(pin) {
+                    let is_high = self.gpio.read_pin(pin);
+                    raw_levels[i] = is_high;
+                    // 霍爾模組 (5..12) 根據 active_high 判斷 (true = HIGH 觸發, false = LOW 觸發)
+                    let is_triggered = if (5..=12).contains(&i) {
+                        if active_high { is_high } else { !is_high }
+                    } else {
+                        !is_high
+                    };
+                    if is_triggered {
                         counts[i] += 1;
                     }
                 }
@@ -934,6 +947,7 @@ impl AppContext {
             s.hall_6 = counts[10] >= 2;
             s.hall_7 = counts[11] >= 2;
             s.hall_8 = counts[12] >= 2;
+            s.raw_hall_levels = (5..=12).map(|i| if raw_levels[i] { 1 } else { 0 }).collect();
             s.press_done = counts[13] >= 2;
             Self::sync_derived_sensors(&mut s);
         } else {
@@ -975,16 +989,16 @@ impl AppContext {
             .count();
         s.hall_arm_metal = s.hall_group_count > 0 || s.hall_active_count > 0;
 
-        // X 軸左側原點：實體霍爾模組 (HALL_1 GPIO 6 / HALL_2 GPIO 7) 或接近開關 LIM_X_A (GPIO 17)
-        let hall_x_origin = s.hall_1 || s.hall_2 || s.hall_group_1;
+        // X 軸左側原點：實體霍爾模組 (HALL_1/2/5/7) 或接近開關 LIM_X_A (GPIO 17)
+        let hall_x_origin = s.hall_1 || s.hall_2 || s.hall_5 || s.hall_7 || s.hall_group_1 || s.hall_group_3 || s.hall_group_4;
         s.lim_x_a = s.lim_x_a || hall_x_origin;
         s.lim_left = s.lim_x_a;
 
         s.lim_mid = s.lim_x_b;
         s.lim_right = s.lim_x_c;
 
-        // Y 軸（Z 軸）向上原點：實體霍爾模組 (HALL_3 GPIO 8 / HALL_4 GPIO 9) 或接近開關 LIM_Z_D (GPIO 22)
-        let hall_z_origin = s.hall_3 || s.hall_4 || s.hall_group_2;
+        // Y 軸（Z 軸）向上原點：實體霍爾模組 (HALL_3/4/6/8) 或接近開關 LIM_Z_D (GPIO 22)
+        let hall_z_origin = s.hall_3 || s.hall_4 || s.hall_6 || s.hall_8 || s.hall_group_2;
         s.lim_z_d = s.lim_z_d || hall_z_origin;
         s.lim_up = s.lim_z_d;
 

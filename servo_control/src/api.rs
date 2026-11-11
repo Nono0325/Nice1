@@ -699,6 +699,9 @@ pub async fn api_set_limits(
         if let Some(v) = parse_f64(data.get("z_lead_mm")) { s.z_lead_mm = v.max(0.01); }
         if let Some(v) = parse_f64(data.get("homing_retract_mm")) { s.homing_retract_mm = v.max(0.5); }
         if let Some(v) = parse_f64(data.get("homing_latch_hz")) { s.homing_latch_hz = v.clamp(50.0, 5000.0); }
+        if let Some(v) = data.get("hall_active_high").and_then(|v| v.as_bool()) {
+            s.hall_active_high = v;
+        }
 
         if data.get("x_scale").is_some() && x_min_mm_in.is_none() && x_max_mm_in.is_none() {
             s.x_max_mm = ((s.x_min_mm + (s.x_max - s.x_min) as f64 / s.x_scale.max(0.001)) * 10.0)

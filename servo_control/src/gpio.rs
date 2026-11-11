@@ -114,14 +114,42 @@ impl HardwareGpio {
         true
     }
 
+    /// 支援自適應/雙極性消抖檢測：
+    /// 如果 active_high 為 true 檢測高電平觸發；如果為 false 檢測低電平觸發
+    #[inline]
+    pub fn is_pin_active_debounced(&self, pin: u8, active_high: bool) -> bool {
+        let v1 = self.read_pin(pin);
+        if active_high {
+            if !v1 {
+                return false;
+            }
+            delay_micros(6);
+            self.read_pin(pin)
+        } else {
+            if v1 {
+                return false;
+            }
+            delay_micros(6);
+            !self.read_pin(pin)
+        }
+    }
+
     /// 工業抗干擾數位濾波消抖讀取 (Active-low NPN/光耦觸發為 LOW)
     #[inline]
     pub fn is_pin_active_low_debounced(&self, pin: u8) -> bool {
-        if self.read_pin(pin) {
-            return false;
+        self.is_pin_active_debounced(pin, false)
+    }
+
+    /// 智慧電平跳變檢測：比對當前電平與初始基準電平，一旦發生狀態反轉立即判定觸發
+    #[inline]
+    pub fn is_pin_flipped(&self, pin: u8, baseline: bool) -> bool {
+        let v = self.read_pin(pin);
+        if v != baseline {
+            delay_micros(6);
+            self.read_pin(pin) != baseline
+        } else {
+            false
         }
-        delay_micros(8);
-        !self.read_pin(pin)
     }
 }
 
@@ -268,11 +296,14 @@ impl StepperMotor {
 
                 // 限位與霍爾開關硬體防撞即時保護 (具備微秒級雙重採樣消抖，濾除電磁雜訊)
                 if motor.gpio.is_raspberry_pi {
+                    let active_high = ctx.state.read().unwrap().hall_active_high;
                     if motor.name == "x" {
-                        // X 軸原點/向後限位 (GPIO 17 LIM_X_A 或 霍爾感測器)
+                        // X 軸原點/向後限位 (GPIO 17 LIM_X_A 或 霍爾感測器 6, 7, 10, 4)
                         let lim_a_hit = motor.gpio.is_pin_active_low_debounced(17)
-                            || motor.gpio.is_pin_active_low_debounced(6)
-                            || motor.gpio.is_pin_active_low_debounced(7);
+                            || motor.gpio.is_pin_active_debounced(6, active_high)
+                            || motor.gpio.is_pin_active_debounced(7, active_high)
+                            || motor.gpio.is_pin_active_debounced(10, active_high)
+                            || motor.gpio.is_pin_active_debounced(4, active_high);
                         if diff < 0.0 && lim_a_hit {
                             motor.halt();
                             // 觸發原點立即自動校準歸零坐標點
@@ -301,12 +332,14 @@ impl StepperMotor {
                             continue;
                         }
                     } else {
-                        // Z 軸原點/安全位置 (GPIO 22 LIM_Z_D 或 霍爾感測器)
+                        // Z 軸原點/安全位置 (GPIO 22 LIM_Z_D 或 霍爾感測器 8, 9, 6, 7, 11, 21)
                         let lim_origin_hit = motor.gpio.is_pin_active_low_debounced(22)
-                            || motor.gpio.is_pin_active_low_debounced(6)
-                            || motor.gpio.is_pin_active_low_debounced(7)
-                            || motor.gpio.is_pin_active_low_debounced(8)
-                            || motor.gpio.is_pin_active_low_debounced(9);
+                            || motor.gpio.is_pin_active_debounced(8, active_high)
+                            || motor.gpio.is_pin_active_debounced(9, active_high)
+                            || motor.gpio.is_pin_active_debounced(6, active_high)
+                            || motor.gpio.is_pin_active_debounced(7, active_high)
+                            || motor.gpio.is_pin_active_debounced(11, active_high)
+                            || motor.gpio.is_pin_active_debounced(21, active_high);
                         if diff < 0.0 && lim_origin_hit {
                             motor.halt();
                             // 觸發原點立即自動校準歸零坐標點
@@ -398,20 +431,25 @@ impl StepperMotor {
                     // 步進前直接硬體讀取感測器，加入二重取樣消抖，防止電磁干擾誤煞停
                     if !dir_positive {
                         // 往後/原點方向
+                        let ah = ctx.state.read().unwrap().hall_active_high;
                         if motor.name == "x" {
                             if motor.gpio.is_pin_active_low_debounced(17)
-                                || motor.gpio.is_pin_active_low_debounced(6)
-                                || motor.gpio.is_pin_active_low_debounced(7)
+                                || motor.gpio.is_pin_active_debounced(6, ah)
+                                || motor.gpio.is_pin_active_debounced(7, ah)
+                                || motor.gpio.is_pin_active_debounced(10, ah)
+                                || motor.gpio.is_pin_active_debounced(4, ah)
                             {
                                 hit_limit_stop = true;
                                 break;
                             }
                         } else {
                             if motor.gpio.is_pin_active_low_debounced(22)
-                                || motor.gpio.is_pin_active_low_debounced(8)
-                                || motor.gpio.is_pin_active_low_debounced(9)
-                                || motor.gpio.is_pin_active_low_debounced(6)
-                                || motor.gpio.is_pin_active_low_debounced(7)
+                                || motor.gpio.is_pin_active_debounced(8, ah)
+                                || motor.gpio.is_pin_active_debounced(9, ah)
+                                || motor.gpio.is_pin_active_debounced(6, ah)
+                                || motor.gpio.is_pin_active_debounced(7, ah)
+                                || motor.gpio.is_pin_active_debounced(11, ah)
+                                || motor.gpio.is_pin_active_debounced(21, ah)
                             {
                                 hit_limit_stop = true;
                                 break;
@@ -601,20 +639,33 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         }
     }
 
+    let active_high = ctx.state.read().unwrap().hall_active_high;
+
     let check_sensor = |cfg: &HomingCfg| -> bool {
-        if cfg.name == "x" {
-            // X 軸向左歸零：優先檢測 X 軸霍爾模組 (GPIO 6 / GPIO 7)，兼容接近開關 (GPIO 17)
-            ctx.gpio.is_pin_active_low_debounced(6)
-                || ctx.gpio.is_pin_active_low_debounced(7)
-                || ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin)
+        let (hall_pins, lim_pin) = if cfg.name == "x" {
+            // X 軸向左歸零：覆蓋 8 顆霍爾中所有可能接線，優先 6, 7, 10, 4
+            (&[6u8, 7, 10, 4, 8, 9, 11, 21][..], cfg.lim_pin)
         } else {
-            // Y 軸向上歸零：優先檢測 Y 軸霍爾模組 (GPIO 8 / GPIO 9 或 6/7)，兼容接近開關 (GPIO 22)
-            ctx.gpio.is_pin_active_low_debounced(8)
-                || ctx.gpio.is_pin_active_low_debounced(9)
-                || ctx.gpio.is_pin_active_low_debounced(6)
-                || ctx.gpio.is_pin_active_low_debounced(7)
-                || ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin)
+            // Y 軸向上歸零：覆蓋 8 顆霍爾中所有可能接線，優先 8, 9, 6, 7, 11, 21
+            (&[8u8, 9, 6, 7, 11, 21, 10, 4][..], cfg.lim_pin)
+        };
+
+        // 1. 檢測接近開關 (NPN 常開低電平)
+        if ctx.gpio.is_pin_active_low_debounced(lim_pin) {
+            return true;
         }
+
+        // 2. 檢測霍爾模組：同時支援 Active-Low (低電平) 與 Active-High (高電平/光耦跳線輸出高)
+        for &pin in hall_pins {
+            if ctx.gpio.is_pin_active_debounced(pin, active_high) {
+                return true;
+            }
+            // 雙重自適應保險：若預設低電平未觸發，但檢測到該腳位顯著翻轉為對立電平
+            if active_high && ctx.gpio.is_pin_active_debounced(pin, false) {
+                return true;
+            }
+        }
+        false
     };
 
     // ── 階段 0: 若開關已被觸發（或已在原點），先向正方向安全退開 ──

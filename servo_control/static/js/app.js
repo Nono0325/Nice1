@@ -583,11 +583,11 @@ function updateUI() {
   const polEl = document.getElementById('tagHallPolarity');
   if (polEl) {
     if (s.hall_active_high) {
-      polEl.className = 'tag tag-amber';
-      polEl.textContent = 'Active-HIGH (3.3V 高電平觸發)';
+      polEl.className = 'tag tag-green';
+      polEl.textContent = 'Active-HIGH (感應時亮燈 / 觸發)';
     } else {
       polEl.className = 'tag tag-blue';
-      polEl.textContent = 'Active-LOW (0V 低電平觸發)';
+      polEl.textContent = 'Active-LOW (感應時低電平觸發)';
     }
   }
   for (let g = 1; g <= 4; g++) {

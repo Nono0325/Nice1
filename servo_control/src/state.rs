@@ -229,7 +229,7 @@ impl SystemState {
             hall_active_count: 0,
             hall_group_count: 0,
             hall_arm_metal: false,
-            hall_active_high: false,
+            hall_active_high: true,
             raw_hall_levels: vec![0; 8],
             press_done: false,
             lim_left: false,
@@ -742,6 +742,7 @@ impl AppContext {
                 }
                 if let Some(v) = cfg.get("homing_speed_hz").and_then(|v| v.as_f64()) { s.homing_speed_hz = v; }
                 if let Some(v) = cfg.get("y_sync").and_then(|v| v.as_bool()) { s.y_sync = v; s.z_sync = v; }
+                if let Some(v) = cfg.get("hall_active_high").and_then(|v| v.as_bool()) { s.hall_active_high = v; }
             }
         }
     }
@@ -781,6 +782,7 @@ impl AppContext {
             "y_accel_steps": s.y_accel_steps,
             "homing_speed_hz": s.homing_speed_hz,
             "y_sync": s.y_sync,
+            "hall_active_high": s.hall_active_high,
         });
         if let Ok(json_str) = serde_json::to_string_pretty(&cfg) {
             let _ = fs::write(self.limits_file(), json_str);

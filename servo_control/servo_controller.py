@@ -187,6 +187,7 @@ state = {
     'lim_up':    False,
     'lim_down':  False,
     'hall_metal': False,
+    'hall_active_high': True,
 
     # 系統狀態
     'system_run':    False,
@@ -586,10 +587,14 @@ def read_limit_switches():
                 PIN['HALL_5'], PIN['HALL_6'], PIN['HALL_7'], PIN['HALL_8'],
                 PIN['PRESS_DONE']
             ]
+            ah = bool(state.get('hall_active_high', True))
             readings = [0] * len(pins)
             for sample_idx in range(3):
                 for i, p in enumerate(pins):
-                    if not GPIO.input(p): # NPN 常開開關 / 817 光耦感應金屬時輸出接通 GND(0V)，低電位觸發
+                    val = GPIO.input(p)
+                    # 霍爾 (5..12) 根據 ah 判斷：ah 為 True 時高電平為觸發 (沒感應滅燈，感應到亮燈)
+                    is_trig = bool(val) if (5 <= i <= 12 and ah) else (not val)
+                    if is_trig:
                         readings[i] += 1
                 if sample_idx < 2:
                     time.sleep(0.0001)

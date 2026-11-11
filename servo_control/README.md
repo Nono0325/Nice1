@@ -1,8 +1,8 @@
-# 🤖 樹梅派步進馬達控制系統 (v2.2.0 Industrial Edition)
+# 🤖 樹梅派步進馬達控制系統 (v2.2.1 Industrial Edition)
 
 > **衝壓機自動化搬運系統** — Raspberry Pi X/Z 軸步進馬達控制器 (QN-1805-E1 電感接近開關 + 4組 LSD-P25/20 圓形強力電磁鐵 + 8顆末端霍爾金屬檢測) + 原生 WebSocket 即時網頁監控 + 積木式移動程式工作坊 + G-code 編輯器 + 錯誤日誌輸出中心 + 系統終端機
 
-[![Version](https://img.shields.io/badge/version-v2.2.0-blue?logo=rust)](Cargo.toml)
+[![Version](https://img.shields.io/badge/version-v2.2.1-blue?logo=rust)](Cargo.toml)
 [![Rust](https://img.shields.io/badge/Rust-2021%20Edition-DE522D?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Axum](https://img.shields.io/badge/Axum-0.7%20Tokio-000000?logo=rust)](https://github.com/tokio-rs/axum)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python)](https://python.org)

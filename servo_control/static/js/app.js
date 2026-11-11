@@ -1,9 +1,9 @@
 /**
- * 樹梅派伺服馬達控制系統 - 前端 JavaScript (v2.2.0)
+ * 樹梅派伺服馬達控制系統 - 前端 JavaScript (v2.2.1)
  * Raspberry Pi Servo Motor Controller - Frontend App
  */
 
-const APP_VERSION = 'v2.2.0';
+const APP_VERSION = 'v2.2.1';
 
 // ── 原生 Rust WebSocket (/ws) 高速連線引擎（向下相容 Socket.IO + HTTP 備援）──
 function createRustSocket() {

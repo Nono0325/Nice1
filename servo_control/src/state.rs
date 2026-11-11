@@ -17,7 +17,7 @@ pub const PULSE_MAX: i64 = 2500;
 pub const PULSE_CENTER: i64 = 1250;
 pub const SYSTEM_PULSE_MAX: i64 = 200_000;
 pub const MAX_HISTORY: usize = 60;
-pub const APP_VERSION: &str = "2.2.0";
+pub const APP_VERSION: &str = "2.2.1";
 
 pub fn pulse_to_duty(pulse_us: i64) -> f64 {
     let period_us = 1_000_000.0 / PWM_FREQ;

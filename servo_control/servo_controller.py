@@ -46,7 +46,7 @@ socketio = SocketIO(
     max_http_buffer_size=1000000
 )
 
-APP_VERSION = '2.2.0'
+APP_VERSION = '2.2.1'
 
 # ── GPIO 模式偵測（非 Pi 環境使用 Mock） ───────────────────────────
 IS_RASPBERRY_PI = False

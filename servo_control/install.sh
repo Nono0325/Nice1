@@ -91,29 +91,49 @@ if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
     fi
 fi
 
-if [ -d "$REPO_DIR/.git" ]; then
-    log_info "已存在 Git 倉庫，正在同步最新版本: ${REPO_DIR}"
-    cd "$REPO_DIR"
-    if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
-        su - "$RUN_USER" -c "cd '${REPO_DIR}' && git fetch origin '${REPO_BRANCH}' && git reset --hard 'origin/${REPO_BRANCH}'"
-    else
-        git fetch origin "$REPO_BRANCH"
-        git reset --hard "origin/$REPO_BRANCH"
+sync_git_repo() {
+    local dir="$1"
+    cd "$dir"
+    # 自動清除可能因斷電造成的 0-byte 損壞 git 物件
+    find .git/objects/ -type f -empty -delete 2>/dev/null || true
+
+    local fetch_ok=0
+    git fetch origin "$REPO_BRANCH" 2>/dev/null && git reset --hard "origin/$REPO_BRANCH" 2>/dev/null || fetch_ok=1
+
+    if [ "$fetch_ok" -ne 0 ] || ! git log -1 &>/dev/null; then
+        log_warn "偵測到本機 Git 倉庫損壞 (可能是先前斷電或中斷造成 0-byte 損壞物件)"
+        log_info "正在自動修復：備份設定檔並重新 Clone 乾淨倉庫..."
+        mkdir -p /tmp/nice1_cfg_backup
+        cp -a "${dir}/servo_control/"*.json /tmp/nice1_cfg_backup/ 2>/dev/null || true
+        cd "$RUN_HOME"
+        rm -rf "$dir"
+        git clone --branch "$REPO_BRANCH" --depth=1 "$REPO_URL" "$dir"
+        cp -a /tmp/nice1_cfg_backup/*.json "${dir}/servo_control/" 2>/dev/null || true
+        rm -rf /tmp/nice1_cfg_backup
     fi
-    CURRENT_COMMIT=$(git log -1 --format="%h (%s)" 2>/dev/null || echo "Unknown")
+    cd "$dir"
+    git log -1 --format="%h (%s)" 2>/dev/null || echo "Unknown"
+}
+
+if [ -d "$REPO_DIR/.git" ]; then
+    log_info "已存在 Git 倉庫，正在檢查並同步最新版本: ${REPO_DIR}"
+    if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
+        chown -R "${RUN_USER}:${RUN_USER}" "$REPO_DIR" 2>/dev/null || true
+        CURRENT_COMMIT=$(su - "$RUN_USER" -c "$(declare -f sync_git_repo); sync_git_repo '${REPO_DIR}'")
+    else
+        CURRENT_COMMIT=$(sync_git_repo "$REPO_DIR")
+    fi
     log_ok "倉庫已同步至最新 Commit: ${CURRENT_COMMIT}"
 elif [ -d "${RUN_HOME}/Nice/.git" ]; then
     REPO_DIR="${RUN_HOME}/Nice"
     INSTALL_DIR="${REPO_DIR}/servo_control"
     log_info "偵測到既有倉庫目錄: ${REPO_DIR}"
-    cd "$REPO_DIR"
     if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
-        su - "$RUN_USER" -c "cd '${REPO_DIR}' && git fetch origin '${REPO_BRANCH}' && git reset --hard 'origin/${REPO_BRANCH}'"
+        chown -R "${RUN_USER}:${RUN_USER}" "$REPO_DIR" 2>/dev/null || true
+        CURRENT_COMMIT=$(su - "$RUN_USER" -c "$(declare -f sync_git_repo); sync_git_repo '${REPO_DIR}'")
     else
-        git fetch origin "$REPO_BRANCH"
-        git reset --hard "origin/$REPO_BRANCH"
+        CURRENT_COMMIT=$(sync_git_repo "$REPO_DIR")
     fi
-    CURRENT_COMMIT=$(git log -1 --format="%h (%s)" 2>/dev/null || echo "Unknown")
     log_ok "倉庫已同步至最新 Commit: ${CURRENT_COMMIT}"
 else
     log_info "開始 Clone 倉庫至: ${REPO_DIR}"

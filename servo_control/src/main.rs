@@ -177,8 +177,15 @@ fn spawn_hardware_watchdog(ctx: Arc<AppContext>) {
     });
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to initialize Tokio multi-thread runtime");
+    rt.block_on(async_main());
+}
+
+async fn async_main() {
     let base_dir = resolve_base_dir();
     let ctx = AppContext::new(base_dir.clone());
 

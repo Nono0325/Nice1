@@ -5,6 +5,10 @@ edition = "2021"
 authors = ["Nice Stamping Automation Team"]
 description = "Industrial Raspberry Pi Stepper Motor & Electromagnet Controller in Rust"
 
+[[bin]]
+name = "servo_control"
+path = "src/main.rs"
+
 [dependencies]
 tokio = { version = "1.38", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "macros"] }

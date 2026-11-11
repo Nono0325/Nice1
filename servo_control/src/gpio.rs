@@ -901,4 +901,6 @@ fn execute_simulation_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
             ctx.add_history("Z 軸兩段式精密歸零完成 (坐標點已精準歸零：0.0 mm / 0 µs)", "success");
         }
     }
+}
+
 

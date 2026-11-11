@@ -265,16 +265,16 @@
           <div class="indicator-lamp off" id="lamp-hall-g4" title="第4組霍爾開關 (H7:GPIO4 + H8:GPIO21，817光耦隔離)"></div>
         </div>
         <div class="indicator-group">
-          <div class="indicator-label">X-a(歸零)</div>
-          <div class="indicator-lamp off" id="lamp-limleft" title="QN-1805-E1 a點歸零接近開關"></div>
+          <div class="indicator-label">X-a(左極限)</div>
+          <div class="indicator-lamp off" id="lamp-limleft" title="QN-1805-E1 a點向左行程極限開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">X-b(中間)</div>
           <div class="indicator-lamp off" id="lamp-limmid" title="QN-1805-E1 b點中間模具接近開關"></div>
         </div>
         <div class="indicator-group">
-          <div class="indicator-label">X-c(右極限)</div>
-          <div class="indicator-lamp off" id="lamp-limright" title="QN-1805-E1 c點右極限接近開關"></div>
+          <div class="indicator-label">X-c(右歸零)</div>
+          <div class="indicator-lamp off" id="lamp-limright" title="QN-1805-E1 / 霍爾模組 c點右側歸零開關"></div>
         </div>
         <div class="indicator-group">
           <div class="indicator-label">Z-d(上歸零)</div>
@@ -302,9 +302,9 @@
         </div>
       </div>
       <div class="position-bar-labels">
-        <span id="xBarLblLeft">0.0 mm (a點: 歸零)</span>
-        <span id="xBarLblMid">100.0 mm (b點: 中間模具位)</span>
-        <span id="xBarLblRight">200.0 mm (c點: 右極限放料)</span>
+        <span id="xBarLblLeft">200.0 mm (a點: 左極限)</span>
+        <span id="xBarLblMid">100.0 mm (b點: 中間工位)</span>
+        <span id="xBarLblRight">0.0 mm (c點: 右側原點歸零)</span>
       </div>
       <div class="position-track" id="xTrack" style="cursor:pointer" title="點擊設定 X 軸位置">
         <div class="position-track-inner" id="xBar" style="width:50%"></div>
@@ -383,7 +383,7 @@
         </div>
         <div class="divider"></div>
         <div style="display:flex;gap:12px">
-          <button class="btn btn-primary" id="btnHomeX" style="flex:1;font-size:16px" onclick="cmdHome('x')">🏠 X 軸平穩歸零 (a點)</button>
+          <button class="btn btn-primary" id="btnHomeX" style="flex:1;font-size:16px" onclick="cmdHome('x')">🏠 X 軸向右歸零 (c點)</button>
         </div>
       </div>
 
@@ -481,7 +481,7 @@
 
         <!-- 全部歸零 -->
         <button class="btn btn-warning" id="btnHomeAll" style="padding:14px 20px;font-size:13px" onclick="cmdHome('all')">
-          🏠 全部歸零 (X-a / Z-d)
+          🏠 全部歸零 (X-右 / Z-上)
         </button>
         <span id="homingIndicator" style="display:none;font-size:13px;color:var(--accent-amber);animation:pulse 0.8s infinite alternate">⏳ 歸零中...</span>
       </div>
@@ -584,9 +584,9 @@
         <table class="diag-table">
           <thead><tr><th>開關位置 (工位)</th><th>GPIO (BCM)</th><th>狀態</th></tr></thead>
           <tbody>
-            <tr><td>X 軸 a 點 (左歸零原點)</td><td>GPIO 17</td><td><span class="tag" id="mon-limleft">正常</span></td></tr>
+            <tr><td>X 軸 a 點 (向左行程極限)</td><td>GPIO 17</td><td><span class="tag" id="mon-limleft">正常</span></td></tr>
             <tr><td>X 軸 b 點 (中間衝壓模具位)</td><td>GPIO 25</td><td><span class="tag" id="mon-limmid">正常</span></td></tr>
-            <tr><td>X 軸 c 點 (向右極限放料位)</td><td>GPIO 27</td><td><span class="tag" id="mon-limright">正常</span></td></tr>
+            <tr><td>X 軸 c 點 (右側原點歸零)</td><td>GPIO 27</td><td><span class="tag" id="mon-limright">正常</span></td></tr>
             <tr><td>Z 軸 d 點 (向上歸零安全高度)</td><td>GPIO 22</td><td><span class="tag" id="mon-limup">正常</span></td></tr>
             <tr><td>Z 軸 e 點 (向下極限取料面)</td><td>GPIO 23</td><td><span class="tag" id="mon-limdown">正常</span></td></tr>
           </tbody>

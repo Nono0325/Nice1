@@ -673,9 +673,9 @@ function updateUI() {
   const xQ1Mm  = xMinMm + (xMaxMm - xMinMm) * 0.25;
   const xQ3Mm  = xMinMm + (xMaxMm - xMinMm) * 0.75;
   const xMidUs = Math.round((s.x_min + s.x_max) / 2);
-  setElText('xBarLblLeft',  `${fmtScaleMm(xMinMm)} mm / ${s.x_min} µs (a點: 歸零)`);
+  setElText('xBarLblLeft',  `${fmtScaleMm(xMinMm)} mm / ${s.x_min} µs (a點: 左極限)`);
   setElText('xBarLblMid',   `${fmtScaleMm(xMidMm)} mm / ${xMidUs} µs (b點: 中間位)`);
-  setElText('xBarLblRight', `${fmtScaleMm(xMaxMm)} mm / ${s.x_max} µs (c點: 右極限)`);
+  setElText('xBarLblRight', `${fmtScaleMm(xMaxMm)} mm / ${s.x_max} µs (c點: 右歸零)`);
   setElText('xTick0', `a點 (${fmtScaleMm(xMinMm)} mm)`);
   setElText('xTick1', `${fmtScaleMm(xQ1Mm)} mm`);
   setElText('xTick2', `b點 (${fmtScaleMm(xMidMm)} mm)`);
@@ -1754,9 +1754,9 @@ function _renderBlockBodyHTML(b, idx) {
   switch (b.type) {
     case 'GOTO': {
       const opts = [
-        ['X_A', '↔️ X軸 a點 (0mm 左歸零原點)'],
-        ['X_B', '↔️ X軸 b點 (100mm 中間模具位)'],
-        ['X_C', '↔️ X軸 c點 (200mm 右極限放料位)'],
+        ['X_A', '↔️ X軸 a點 (左端行程極限)'],
+        ['X_B', '↔️ X軸 b點 (中間模具位)'],
+        ['X_C', '↔️ X軸 c點 (0mm 右歸零原點)'],
         ['Z_D', '↕️ Z軸 d點 (200mm 向上安全高度)'],
         ['Z_E', '↕️ Z軸 e點 (0mm 向下取放高度)'],
         ['Z_HALF', '↕️ Z軸 50% (100mm 避讓高度)']
@@ -1791,8 +1791,8 @@ function _renderBlockBodyHTML(b, idx) {
     case 'HOME': {
       return `<span>🏠 執行原點平穩歸零：</span>
               <select class="puzzle-select" onchange="updateBlockField(${idx}, 'axis', this.value)">
-                <option value="ALL" ${b.axis === 'ALL' ? 'selected' : ''}>全軸同步歸零 (X回a點 + Z回d點)</option>
-                <option value="X" ${b.axis === 'X' ? 'selected' : ''}>僅 X 軸歸零 (回左端 a 點)</option>
+                <option value="ALL" ${b.axis === 'ALL' ? 'selected' : ''}>全軸同步歸零 (X向右 + Z向上)</option>
+                <option value="X" ${b.axis === 'X' ? 'selected' : ''}>僅 X 軸歸零 (回右端 c 點)</option>
                 <option value="Z" ${b.axis === 'Z' ? 'selected' : ''}>僅 Z 軸歸零 (回頂部 d 點)</option>
               </select>`;
     }

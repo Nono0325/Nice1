@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
 
 mod api;
 mod automation;
@@ -6,7 +8,7 @@ mod gpio;
 mod state;
 
 use axum::{
-    routing::{delete, get, post},
+    routing::{get, post},
     Router,
 };
 use chrono::Local;

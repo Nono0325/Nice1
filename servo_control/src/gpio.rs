@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::state::{AppContext, PULSE_CENTER};
+use crate::state::AppContext;
 
 /// 高精度微秒延遲：短延遲使用 spin_loop 避免 Linux 排程器 60~80µs 喚醒延遲，長延遲結合 sleep + spin
 #[inline]

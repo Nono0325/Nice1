@@ -159,7 +159,7 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
     let delta_mm = data.get("delta_mm").and_then(|v| v.as_f64());
     let delta_us = data.get("delta").and_then(|v| v.as_f64());
 
-    let (sys_run, scale, x_min, x_max, z_min, z_max, lim_xa, lim_xc, lim_ze, lim_zd) = {
+    let (sys_run, scale, _x_min, x_max, _z_min, z_max, lim_xa, lim_xc, lim_ze, lim_zd) = {
         let s = ctx.state.read().unwrap();
         (
             s.system_run,

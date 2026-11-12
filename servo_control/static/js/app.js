@@ -609,11 +609,44 @@ function updateUI() {
     }
   }
   updateTag('mon-press', (s.press_done !== undefined ? s.press_done : true), '🟢 完成', '⏳ 等待中', 'tag-green', 'tag-amber');
-  updateTag('mon-limleft',  (s.lim_x_a || s.lim_left),  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
-  updateTag('mon-limmid',   (s.lim_x_b || s.lim_mid),   '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
-  updateTag('mon-limright', (s.lim_x_c || s.lim_right), '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
-  updateTag('mon-limup',    (s.lim_z_d || s.lim_up),    '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
-  updateTag('mon-limdown',  (s.lim_z_e || s.lim_down),  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
+
+  const updateSensorRow = (polId, monId, lampId, enabled, activeHigh, triggered) => {
+    const polEl = document.getElementById(polId);
+    const monEl = document.getElementById(monId);
+    if (!enabled) {
+      if (polEl) {
+        polEl.textContent = '未接線 (停用)';
+        polEl.className = 'tag tag-dim';
+      }
+      if (monEl) {
+        monEl.textContent = '⚪ 未接線';
+        monEl.className = 'tag tag-dim';
+      }
+      if (lampId) setLamp(lampId, 'off');
+    } else {
+      if (polEl) {
+        polEl.textContent = activeHigh ? 'NC (高電平)' : 'NO (低電平)';
+        polEl.className = activeHigh ? 'tag tag-purple' : 'tag tag-blue';
+      }
+      if (monEl) {
+        monEl.textContent = triggered ? '🔴 觸發' : '✔ 正常';
+        monEl.className = triggered ? 'tag tag-red' : 'tag tag-green';
+      }
+      if (lampId) setLamp(lampId, triggered ? 'red' : 'off');
+    }
+  };
+
+  const en_xa = s.lim_x_a_enabled !== undefined ? !!s.lim_x_a_enabled : true;
+  const en_xb = s.lim_x_b_enabled !== undefined ? !!s.lim_x_b_enabled : true;
+  const en_xc = s.lim_x_c_enabled !== undefined ? !!s.lim_x_c_enabled : false;
+  const en_zd = s.lim_z_d_enabled !== undefined ? !!s.lim_z_d_enabled : false;
+  const en_ze = s.lim_z_e_enabled !== undefined ? !!s.lim_z_e_enabled : true;
+
+  updateSensorRow('pol-lim-a', 'mon-limleft',  'lamp-limleft',  en_xa, !!s.lim_x_a_active_high, (s.lim_x_a || s.lim_left));
+  updateSensorRow('pol-lim-b', 'mon-limmid',   'lamp-limmid',   en_xb, !!s.lim_x_b_active_high, (s.lim_x_b || s.lim_mid));
+  updateSensorRow('pol-lim-c', 'mon-limright', 'lamp-limright', en_xc, !!s.lim_x_c_active_high, (s.lim_x_c || s.lim_right));
+  updateSensorRow('pol-lim-d', 'mon-limup',    'lamp-limup',    en_zd, !!s.lim_z_d_active_high, (s.lim_z_d || s.lim_up));
+  updateSensorRow('pol-lim-e', 'mon-limdown',  'lamp-limdown',  en_ze, !!s.lim_z_e_active_high, (s.lim_z_e || s.lim_down));
 
   const fmtRaw = (val) => val === undefined ? '-' : (val ? 'HIGH (3.3V)' : 'LOW (0V)');
   const clsRaw = (val) => val ? 'tag tag-purple' : 'tag tag-blue';
@@ -630,20 +663,7 @@ function updateUI() {
   setRaw('raw-lim-d', s.raw_zd);
   setRaw('raw-lim-e', s.raw_ze);
 
-  const fmtPol = (ah) => ah ? 'NC (高電平)' : 'NO (低電平)';
-  const clsPol = (ah) => ah ? 'tag tag-purple' : 'tag tag-blue';
-  const setPol = (id, ah) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.textContent = fmtPol(ah);
-      el.className = clsPol(ah);
-    }
-  };
-  setPol('pol-lim-a', !!s.lim_x_a_active_high);
-  setPol('pol-lim-b', !!s.lim_x_b_active_high);
-  setPol('pol-lim-c', s.lim_x_c_active_high !== undefined ? !!s.lim_x_c_active_high : true);
-  setPol('pol-lim-d', s.lim_z_d_active_high !== undefined ? !!s.lim_z_d_active_high : true);
-  setPol('pol-lim-e', !!s.lim_z_e_active_high);
+
 
   // 訊號檢測 Tab
   const duty = (µs) => ((µs / 20000) * 100).toFixed(3);
@@ -864,13 +884,38 @@ async function toggleHallPolarity() {
   }
 }
 
-async function toggleSensorPolarity(sensorKey) {
-  const fullKey = `${sensorKey}_active_high`;
-  const defaultHigh = (sensorKey === 'lim_x_c' || sensorKey === 'lim_z_d');
-  const currentVal = state[fullKey] !== undefined ? !!state[fullKey] : defaultHigh;
-  const nextVal = !currentVal;
+async function cycleSensorMode(sensorKey) {
+  const enKey = `${sensorKey}_enabled`;
+  const polKey = `${sensorKey}_active_high`;
+  const defaultEn = (sensorKey !== 'lim_x_c' && sensorKey !== 'lim_z_d');
+  const isEnabled = state[enKey] !== undefined ? !!state[enKey] : defaultEn;
+  const isHigh = state[polKey] !== undefined ? !!state[polKey] : false;
+
+  let nextEnabled = true;
+  let nextHigh = false;
+  let desc = '';
+
+  if (!isEnabled) {
+    // ⚪ 未接線(停用) -> 🔵 NO (低電平觸發，標準常開 NPN)
+    nextEnabled = true;
+    nextHigh = false;
+    desc = 'NO (低電平觸發)';
+  } else if (!isHigh) {
+    // 🔵 NO (低電平) -> 🟣 NC (高電平觸發，常閉 NPN)
+    nextEnabled = true;
+    nextHigh = true;
+    desc = 'NC (高電平觸發)';
+  } else {
+    // 🟣 NC (高電平) -> ⚪ 未接線 (停用保護)
+    nextEnabled = false;
+    nextHigh = false;
+    desc = '未接線 (停用保護)';
+  }
+
   const payload = {};
-  payload[fullKey] = nextVal;
+  payload[enKey] = nextEnabled;
+  payload[polKey] = nextHigh;
+
   let r = await apiPost('/api/set_limits', payload);
   if (!r || !r.ok) {
     r = await apiPost('/api/settings', payload);
@@ -879,13 +924,16 @@ async function toggleSensorPolarity(sensorKey) {
     if (r.state) {
       state = { ...state, ...r.state };
     } else {
-      state[fullKey] = nextVal;
+      state[enKey] = nextEnabled;
+      state[polKey] = nextHigh;
     }
-    toast(`接近開關 ${sensorKey.toUpperCase()} 極性切換為: ${nextVal ? 'NC (高電平/開路觸發)' : 'NO (低電平觸發)'}`, 'success');
-    addLog(`切換接近開關 ${sensorKey} 極性: ${nextVal ? 'NC' : 'NO'}`, 'info');
+    toast(`接近開關 ${sensorKey.toUpperCase()} 模式切換為: ${desc}`, 'success');
+    addLog(`切換接近開關 ${sensorKey} 模式: ${desc}`, 'info');
     updateUI();
   }
 }
+
+const toggleSensorPolarity = cycleSensorMode;
 
 async function cmdHome(axis) {
   // 如果歸零已在執行中，拒絕重覆觸發

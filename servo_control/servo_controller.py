@@ -193,6 +193,16 @@ state = {
     'lim_down':  False,
     'hall_metal': False,
     'hall_active_high': True,
+    'lim_x_a_enabled': True,
+    'lim_x_b_enabled': True,
+    'lim_x_c_enabled': False,
+    'lim_z_d_enabled': False,
+    'lim_z_e_enabled': True,
+    'lim_x_a_active_high': False,
+    'lim_x_b_active_high': False,
+    'lim_x_c_active_high': False,
+    'lim_z_d_active_high': False,
+    'lim_z_e_active_high': False,
 
     # 系統狀態
     'system_run':    False,
@@ -629,11 +639,11 @@ def read_limit_switches():
             state['raw_xc'] = bool(GPIO.input(pins[2]))
             state['raw_zd'] = bool(GPIO.input(pins[3]))
             state['raw_ze'] = bool(GPIO.input(pins[4]))
-            state['lim_x_a'] = readings[0] >= 2
-            state['lim_x_b'] = readings[1] >= 2
-            state['lim_x_c'] = readings[2] >= 2
-            state['lim_z_d'] = readings[3] >= 2
-            state['lim_z_e'] = readings[4] >= 2
+            state['lim_x_a'] = bool(state.get('lim_x_a_enabled', True)) and (readings[0] >= 2)
+            state['lim_x_b'] = bool(state.get('lim_x_b_enabled', True)) and (readings[1] >= 2)
+            state['lim_x_c'] = bool(state.get('lim_x_c_enabled', False)) and (readings[2] >= 2)
+            state['lim_z_d'] = bool(state.get('lim_z_d_enabled', False)) and (readings[3] >= 2)
+            state['lim_z_e'] = bool(state.get('lim_z_e_enabled', True)) and (readings[4] >= 2)
             for idx in range(8):
                 state[f'hall_{idx+1}'] = readings[5 + idx] >= 2
             state['press_done'] = readings[13] >= 2
@@ -2177,6 +2187,9 @@ def api_set_limits():
 
     if 'hall_active_high' in data:
         state['hall_active_high'] = bool(data['hall_active_high'])
+    for en_k in ['lim_x_a_enabled', 'lim_x_b_enabled', 'lim_x_c_enabled', 'lim_z_d_enabled', 'lim_z_e_enabled']:
+        if en_k in data:
+            state[en_k] = bool(data[en_k])
     for pol_k in ['lim_x_a_active_high', 'lim_x_b_active_high', 'lim_x_c_active_high', 'lim_z_d_active_high', 'lim_z_e_active_high']:
         if pol_k in data:
             state[pol_k] = bool(data[pol_k])

@@ -296,9 +296,17 @@ impl StepperMotor {
 
                 // 限位與霍爾開關硬體防撞即時保護 (具備微秒級雙重採樣消抖，濾除電磁雜訊)
                 if motor.gpio.is_raspberry_pi {
-                    let (hall_ah, xa_ah, xc_ah, zd_ah, ze_ah) = {
+                    let (hall_ah, xa_ah, xc_ah, zd_ah, ze_ah, en_xc, en_zd) = {
                         let s = ctx.state.read().unwrap();
-                        (s.hall_active_high, s.lim_x_a_active_high, s.lim_x_c_active_high, s.lim_z_d_active_high, s.lim_z_e_active_high)
+                        (
+                            s.hall_active_high,
+                            s.lim_x_a_active_high,
+                            s.lim_x_c_active_high,
+                            s.lim_z_d_active_high,
+                            s.lim_z_e_active_high,
+                            s.lim_x_c_enabled,
+                            s.lim_z_d_enabled,
+                        )
                     };
                     if motor.name == "x" {
                         // X 軸向左 a 點原點保護 (GPIO 17 LIM_X_A 或 A 點霍爾模組 1..8 全覆蓋，或狀態已觸發)
@@ -328,8 +336,8 @@ impl StepperMotor {
                             thread::sleep(Duration::from_millis(10));
                             continue;
                         }
-                        // X 軸向右 c 點極限 (僅檢測 GPIO 27 LIM_X_C 接近開關，支援 NC/Active-HIGH)
-                        let lim_c_hit = motor.gpio.is_pin_active_debounced(27, xc_ah);
+                        // X 軸向右 c 點極限 (僅檢測 GPIO 27 LIM_X_C 接近開關，若啟用且支援 NC/Active-HIGH)
+                        let lim_c_hit = en_xc && motor.gpio.is_pin_active_debounced(27, xc_ah);
                         if diff > 0.0 && lim_c_hit {
                             motor.halt();
                             {
@@ -341,8 +349,8 @@ impl StepperMotor {
                             continue;
                         }
                     } else {
-                        // Z 軸 D 點原點/向上安全高度 (僅檢測 GPIO 22 LIM_Z_D 接近開關，支援 NC/Active-HIGH)
-                        let lim_origin_hit = motor.gpio.is_pin_active_debounced(22, zd_ah);
+                        // Z 軸 D 點原點/向上安全高度 (僅檢測 GPIO 22 LIM_Z_D 接近開關，若啟用且支援 NC/Active-HIGH)
+                        let lim_origin_hit = en_zd && motor.gpio.is_pin_active_debounced(22, zd_ah);
                         if diff < 0.0 && lim_origin_hit {
                             motor.halt();
                             // 觸發原點立即自動校準歸零坐標點
@@ -638,22 +646,43 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 sensor_hit: false,
             });
         } else {
-            ctx.gpio.write_pin(ctx.z_stepper.ena_pin, false);
-            cfgs.push(HomingCfg {
-                name: "z",
-                stepper: Arc::clone(&ctx.z_stepper),
-                pul_pin: ctx.z_stepper.pul_pin,
-                dir_pin: ctx.z_stepper.dir_pin,
-                lim_pin: 22, // LIM_Z_D
-                max_bound: z_max_mm,
-                steps_per_mm: z_spu,
-                step_val: 1.0 / z_spu,
-                seek_high: false,
-                backoff_high: true,
-                triggered: false,
-                sensor_hit: false,
-            });
+            let zd_en = ctx.state.read().unwrap().lim_z_d_enabled;
+            if !zd_en {
+                ctx.add_history("Z 軸 d 點原點開關 (GPIO 22) 標記為未接線/停用，直接以當前位置作為 Z 軸原點 (0.0 mm)", "info");
+                ctx.z_stepper.set_position(0.0);
+                {
+                    let mut s = ctx.state.write().unwrap();
+                    s.z_pulse = 0;
+                    s.z_mm = 0.0;
+                    s.z_pct = 0.0;
+                    s.y1_pulse = 0;
+                    s.y2_pulse = 0;
+                    s.y_mm = 0.0;
+                    s.y_pct = 0.0;
+                    s.z_homed = true;
+                }
+            } else {
+                ctx.gpio.write_pin(ctx.z_stepper.ena_pin, false);
+                cfgs.push(HomingCfg {
+                    name: "z",
+                    stepper: Arc::clone(&ctx.z_stepper),
+                    pul_pin: ctx.z_stepper.pul_pin,
+                    dir_pin: ctx.z_stepper.dir_pin,
+                    lim_pin: 22, // LIM_Z_D
+                    max_bound: z_max_mm,
+                    steps_per_mm: z_spu,
+                    step_val: 1.0 / z_spu,
+                    seek_high: false,
+                    backoff_high: true,
+                    triggered: false,
+                    sensor_hit: false,
+                });
+            }
         }
+    }
+
+    if cfgs.is_empty() {
+        return;
     }
 
     let (active_high, xa_ah, zd_ah) = {

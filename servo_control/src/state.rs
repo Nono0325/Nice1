@@ -116,6 +116,11 @@ pub struct SystemState {
     pub hall_group_count: usize,
     pub hall_arm_metal: bool,
     pub hall_active_high: bool,
+    pub lim_x_a_enabled: bool,
+    pub lim_x_b_enabled: bool,
+    pub lim_x_c_enabled: bool,
+    pub lim_z_d_enabled: bool,
+    pub lim_z_e_enabled: bool,
     pub lim_x_a_active_high: bool,
     pub lim_x_b_active_high: bool,
     pub lim_x_c_active_high: bool,
@@ -240,10 +245,15 @@ impl SystemState {
             hall_group_count: 0,
             hall_arm_metal: false,
             hall_active_high: true,
+            lim_x_a_enabled: true,
+            lim_x_b_enabled: true,
+            lim_x_c_enabled: false, // GPIO 27 未接線，預設停用避免誤報
+            lim_z_d_enabled: false, // GPIO 22 未接線，預設停用避免誤報
+            lim_z_e_enabled: true,
             lim_x_a_active_high: false,
             lim_x_b_active_high: false,
-            lim_x_c_active_high: true, // GPIO 27 (c點): NC/Active-HIGH, 未感應時為低電平，感應時為高電平
-            lim_z_d_active_high: true, // GPIO 22 (d點): NC/Active-HIGH, 未感應時為低電平，感應時為高電平
+            lim_x_c_active_high: false, // 預設 NO (低電平觸發)
+            lim_z_d_active_high: false, // 預設 NO (低電平觸發)
             lim_z_e_active_high: false,
             raw_hall_levels: vec![0; 8],
             raw_xa: false,
@@ -763,6 +773,11 @@ impl AppContext {
                 if let Some(v) = cfg.get("homing_speed_hz").and_then(|v| v.as_f64()) { s.homing_speed_hz = v; }
                 if let Some(v) = cfg.get("y_sync").and_then(|v| v.as_bool()) { s.y_sync = v; s.z_sync = v; }
                 if let Some(v) = cfg.get("hall_active_high").and_then(|v| v.as_bool()) { s.hall_active_high = v; }
+                if let Some(v) = cfg.get("lim_x_a_enabled").and_then(|v| v.as_bool()) { s.lim_x_a_enabled = v; }
+                if let Some(v) = cfg.get("lim_x_b_enabled").and_then(|v| v.as_bool()) { s.lim_x_b_enabled = v; }
+                if let Some(v) = cfg.get("lim_x_c_enabled").and_then(|v| v.as_bool()) { s.lim_x_c_enabled = v; }
+                if let Some(v) = cfg.get("lim_z_d_enabled").and_then(|v| v.as_bool()) { s.lim_z_d_enabled = v; }
+                if let Some(v) = cfg.get("lim_z_e_enabled").and_then(|v| v.as_bool()) { s.lim_z_e_enabled = v; }
                 if let Some(v) = cfg.get("lim_x_a_active_high").and_then(|v| v.as_bool()) { s.lim_x_a_active_high = v; }
                 if let Some(v) = cfg.get("lim_x_b_active_high").and_then(|v| v.as_bool()) { s.lim_x_b_active_high = v; }
                 if let Some(v) = cfg.get("lim_x_c_active_high").and_then(|v| v.as_bool()) { s.lim_x_c_active_high = v; }
@@ -808,6 +823,11 @@ impl AppContext {
             "homing_speed_hz": s.homing_speed_hz,
             "y_sync": s.y_sync,
             "hall_active_high": s.hall_active_high,
+            "lim_x_a_enabled": s.lim_x_a_enabled,
+            "lim_x_b_enabled": s.lim_x_b_enabled,
+            "lim_x_c_enabled": s.lim_x_c_enabled,
+            "lim_z_d_enabled": s.lim_z_d_enabled,
+            "lim_z_e_enabled": s.lim_z_e_enabled,
             "lim_x_a_active_high": s.lim_x_a_active_high,
             "lim_x_b_active_high": s.lim_x_b_active_high,
             "lim_x_c_active_high": s.lim_x_c_active_high,
@@ -944,7 +964,7 @@ impl AppContext {
                 6, 7, 8, 9, 10, 11, 4, 21, // HALL_1..8
                 5, // PRESS_DONE
             ];
-            let (ah_hall, ah_xa, ah_xb, ah_xc, ah_zd, ah_ze) = {
+            let (ah_hall, ah_xa, ah_xb, ah_xc, ah_zd, ah_ze, en_xa, en_xb, en_xc, en_zd, en_ze) = {
                 let s_r = self.state.read().unwrap();
                 (
                     s_r.hall_active_high,
@@ -953,6 +973,11 @@ impl AppContext {
                     s_r.lim_x_c_active_high,
                     s_r.lim_z_d_active_high,
                     s_r.lim_z_e_active_high,
+                    s_r.lim_x_a_enabled,
+                    s_r.lim_x_b_enabled,
+                    s_r.lim_x_c_enabled,
+                    s_r.lim_z_d_enabled,
+                    s_r.lim_z_e_enabled,
                 )
             };
             let mut raw_levels = [false; 14];
@@ -986,11 +1011,12 @@ impl AppContext {
             s.raw_xc = raw_levels[2];
             s.raw_zd = raw_levels[3];
             s.raw_ze = raw_levels[4];
-            s.lim_x_a = counts[0] >= 2;
-            s.lim_x_b = counts[1] >= 2;
-            s.lim_x_c = counts[2] >= 2;
-            s.lim_z_d = counts[3] >= 2;
-            s.lim_z_e = counts[4] >= 2;
+            // 若該腳位被標記為未接線 (enabled = false)，則強制不觸發
+            s.lim_x_a = en_xa && counts[0] >= 2;
+            s.lim_x_b = en_xb && counts[1] >= 2;
+            s.lim_x_c = en_xc && counts[2] >= 2;
+            s.lim_z_d = en_zd && counts[3] >= 2;
+            s.lim_z_e = en_ze && counts[4] >= 2;
             s.hall_1 = counts[5] >= 2;
             s.hall_2 = counts[6] >= 2;
             s.hall_3 = counts[7] >= 2;
@@ -1004,12 +1030,17 @@ impl AppContext {
             Self::sync_derived_sensors(&mut s);
         } else {
             let mut s = self.state.write().unwrap();
-            s.lim_x_a = x_pos <= (s.x_min as f64) + 5.0;
+            let en_xa = s.lim_x_a_enabled;
+            let en_xb = s.lim_x_b_enabled;
+            let en_xc = s.lim_x_c_enabled;
+            let en_zd = s.lim_z_d_enabled;
+            let en_ze = s.lim_z_e_enabled;
+            s.lim_x_a = en_xa && (x_pos <= (s.x_min as f64) + 5.0);
             let x_mid = (s.x_min as f64 + s.x_max as f64) / 2.0;
-            s.lim_x_b = (x_pos - x_mid).abs() <= 30.0;
-            s.lim_x_c = x_pos >= (s.x_max as f64) - 5.0;
-            s.lim_z_e = z_pos <= (s.z_min as f64) + 5.0;
-            s.lim_z_d = z_pos >= (s.z_max as f64) - 5.0;
+            s.lim_x_b = en_xb && ((x_pos - x_mid).abs() <= 30.0);
+            s.lim_x_c = en_xc && (x_pos >= (s.x_max as f64) - 5.0);
+            s.lim_z_e = en_ze && (z_pos <= (s.z_min as f64) + 5.0);
+            s.lim_z_d = en_zd && (z_pos >= (s.z_max as f64) - 5.0);
             s.raw_xa = s.lim_x_a;
             s.raw_xb = s.lim_x_b;
             s.raw_xc = s.lim_x_c;

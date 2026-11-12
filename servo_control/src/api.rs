@@ -203,8 +203,8 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
         .iter()
         .any(|&p| ctx.gpio.is_pin_active_debounced(p, hall_ah) || (!hall_ah && !ctx.gpio.read_pin(p)));
     let hw_lim_xa = (en_xa && lim_xa) || (is_pi && en_xa && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || (!xa_ah && !ctx.gpio.read_pin(17)) || hall_a_hit));
-    let hw_lim_xc = (en_xc && lim_xc) || (is_pi && en_xc && ctx.gpio.is_pin_active_debounced(27, xc_ah));
-    let hw_lim_zd = (en_zd && lim_zd) || (is_pi && en_zd && ctx.gpio.is_pin_active_debounced(22, zd_ah));
+    let hw_lim_xc = (en_xc && lim_xc) || (is_pi && en_xc && ctx.gpio.is_pin_active_debounced(2, xc_ah));
+    let hw_lim_zd = (en_zd && lim_zd) || (is_pi && en_zd && ctx.gpio.is_pin_active_debounced(3, zd_ah));
     let hw_lim_ze = (en_ze && lim_ze) || (is_pi && en_ze && ctx.gpio.is_pin_active_debounced(23, ze_ah));
 
     if axis == "x" {
@@ -295,8 +295,8 @@ pub async fn api_move(
         .iter()
         .any(|&p| ctx.gpio.is_pin_active_debounced(p, hall_ah) || (!hall_ah && !ctx.gpio.read_pin(p)));
     let hw_lim_xa = (en_xa && lim_xa) || (is_pi && en_xa && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || (!xa_ah && !ctx.gpio.read_pin(17)) || hall_a_hit));
-    let hw_lim_xc = (en_xc && lim_xc) || (is_pi && en_xc && ctx.gpio.is_pin_active_debounced(27, xc_ah));
-    let hw_lim_zd = (en_zd && lim_zd) || (is_pi && en_zd && ctx.gpio.is_pin_active_debounced(22, zd_ah));
+    let hw_lim_xc = (en_xc && lim_xc) || (is_pi && en_xc && ctx.gpio.is_pin_active_debounced(2, xc_ah));
+    let hw_lim_zd = (en_zd && lim_zd) || (is_pi && en_zd && ctx.gpio.is_pin_active_debounced(3, zd_ah));
     let hw_lim_ze = (en_ze && lim_ze) || (is_pi && en_ze && ctx.gpio.is_pin_active_debounced(23, ze_ah));
 
     if axis == "x" {
@@ -1033,8 +1033,8 @@ pub async fn api_diagnose(State(ctx): State<Arc<AppContext>>) -> impl IntoRespon
             "sensor_model": "QN-1805-E1 方形 DC10-30V 三線 NPN (支援 NO常開 / NC常閉 / 未接線停用)",
             "X_A": { "pin": 17, "name": "X軸a點(左歸零原點)", "raw_level": s.raw_xa, "triggered": s.lim_x_a, "enabled": s.lim_x_a_enabled, "active_high": s.lim_x_a_active_high },
             "X_B": { "pin": 25, "name": "X軸b點(中間工位)", "raw_level": s.raw_xb, "triggered": s.lim_x_b, "enabled": s.lim_x_b_enabled, "active_high": s.lim_x_b_active_high },
-            "X_C": { "pin": 27, "name": "X軸c點(向右極限)", "raw_level": s.raw_xc, "triggered": s.lim_x_c, "enabled": s.lim_x_c_enabled, "active_high": s.lim_x_c_active_high },
-            "Z_D": { "pin": 22, "name": "Z軸d點(向上歸零)", "raw_level": s.raw_zd, "triggered": s.lim_z_d, "enabled": s.lim_z_d_enabled, "active_high": s.lim_z_d_active_high },
+            "X_C": { "pin": 2, "name": "X軸c點(向右極限)", "raw_level": s.raw_xc, "triggered": s.lim_x_c, "enabled": s.lim_x_c_enabled, "active_high": s.lim_x_c_active_high },
+            "Z_D": { "pin": 3, "name": "Z軸d點(向上歸零)", "raw_level": s.raw_zd, "triggered": s.lim_z_d, "enabled": s.lim_z_d_enabled, "active_high": s.lim_z_d_active_high },
             "Z_E": { "pin": 23, "name": "Z軸e點(向下極限)", "raw_level": s.raw_ze, "triggered": s.lim_z_e, "enabled": s.lim_z_e_enabled, "active_high": s.lim_z_e_active_high },
         },
         "hall_sensors": {
@@ -1053,8 +1053,8 @@ pub async fn api_diagnose(State(ctx): State<Arc<AppContext>>) -> impl IntoRespon
         "limit_switches": {
             "LEFT": { "pin": 17, "triggered": s.lim_left },
             "MID": { "pin": 25, "triggered": s.lim_mid },
-            "RIGHT": { "pin": 27, "triggered": s.lim_right },
-            "UP": { "pin": 22, "triggered": s.lim_up },
+            "RIGHT": { "pin": 2, "triggered": s.lim_right },
+            "UP": { "pin": 3, "triggered": s.lim_up },
             "DOWN": { "pin": 23, "triggered": s.lim_down },
         },
         "pwm_signal_info": {

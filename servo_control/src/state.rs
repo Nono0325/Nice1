@@ -48,13 +48,13 @@ pub fn pin_config_map() -> HashMap<String, u8> {
     // 電感式接近開關 QN-1805-E1 (a, b, c, d, e)
     m.insert("LIM_X_A".into(), 17);
     m.insert("LIM_X_B".into(), 25);
-    m.insert("LIM_X_C".into(), 27);
-    m.insert("LIM_Z_D".into(), 22);
+    m.insert("LIM_X_C".into(), 2);
+    m.insert("LIM_Z_D".into(), 3);
     m.insert("LIM_Z_E".into(), 23);
     m.insert("LIM_LEFT".into(), 17);
     m.insert("LIM_MID".into(), 25);
-    m.insert("LIM_RIGHT".into(), 27);
-    m.insert("LIM_UP".into(), 22);
+    m.insert("LIM_RIGHT".into(), 2);
+    m.insert("LIM_UP".into(), 3);
     m.insert("LIM_DOWN".into(), 23);
     // 8 顆末端金屬檢測霍爾感測器 (兩個一組共 4 組，817 光耦隔離板)
     m.insert("HALL_1".into(), 6);
@@ -247,8 +247,8 @@ impl SystemState {
             hall_active_high: false, // 預設 NO (低電平 0V 觸發，符合標準 NPN 霍爾)
             lim_x_a_enabled: true,
             lim_x_b_enabled: true,
-            lim_x_c_enabled: false, // GPIO 27 未接線，預設停用避免誤報
-            lim_z_d_enabled: false, // GPIO 22 未接線，預設停用避免誤報
+            lim_x_c_enabled: false, // GPIO 2 (Pin 3) 未接線，預設停用避免誤報
+            lim_z_d_enabled: false, // GPIO 3 (Pin 5) 未接線，預設停用避免誤報
             lim_z_e_enabled: true,
             lim_x_a_active_high: false,
             lim_x_b_active_high: false,
@@ -960,7 +960,7 @@ impl AppContext {
 
         if self.is_raspberry_pi {
             let pins = [
-                17u8, 25, 27, 22, 23, // LIM_X_A, LIM_X_B, LIM_X_C, LIM_Z_D, LIM_Z_E
+                17u8, 25, 2, 3, 23, // LIM_X_A, LIM_X_B, LIM_X_C (GPIO 2 - Pin 3), LIM_Z_D (GPIO 3 - Pin 5), LIM_Z_E
                 6, 7, 8, 9, 10, 11, 4, 21, // HALL_1..8
                 5, // PRESS_DONE
             ];
@@ -990,8 +990,8 @@ impl AppContext {
                     let is_triggered = match i {
                         0 => if ah_xa { is_high } else { !is_high }, // GPIO 17 (a點)
                         1 => if ah_xb { is_high } else { !is_high }, // GPIO 25 (b點)
-                        2 => if ah_xc { is_high } else { !is_high }, // GPIO 27 (c點: 支援NC/Active-HIGH)
-                        3 => if ah_zd { is_high } else { !is_high }, // GPIO 22 (d點: 支援NC/Active-HIGH)
+                        2 => if ah_xc { is_high } else { !is_high }, // GPIO 2 (c點: 支援NC/Active-HIGH)
+                        3 => if ah_zd { is_high } else { !is_high }, // GPIO 3 (d點: 支援NC/Active-HIGH)
                         4 => if ah_ze { is_high } else { !is_high }, // GPIO 23 (e點)
                         5..=12 => if ah_hall { is_high } else { !is_high }, // 霍爾 1..8
                         13 => !is_high, // 衝壓完成訊號 PRESS_DONE
@@ -1090,10 +1090,10 @@ impl AppContext {
         // X 軸 b 點：接近開關 LIM_X_B (GPIO 25)
         s.lim_mid = s.lim_x_b;
 
-        // X 軸 c 點：接近開關 LIM_X_C (GPIO 27) - 獨立檢測，不混入 A 點霍爾
+        // X 軸 c 點：接近開關 LIM_X_C (GPIO 2 - Pin 3)
         s.lim_right = s.lim_x_c;
 
-        // Z 軸 d 點（向上安全高度）：接近開關 LIM_Z_D (GPIO 22) - 獨立檢測，不混入末端霍爾
+        // Z 軸 d 點（向上安全高度）：接近開關 LIM_Z_D (GPIO 3 - Pin 5)
         s.lim_up = s.lim_z_d;
 
         // Z 軸 e 點（向下極限）：接近開關 LIM_Z_E (GPIO 23)

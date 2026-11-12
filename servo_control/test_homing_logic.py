@@ -18,8 +18,10 @@ class MockGpio:
         self.pins = {
             17: 1, # LIM_X_A (pull-up HIGH when idle)
             25: 1, # LIM_X_B
-            27: 1, # LIM_X_C (unconnected)
-            22: 1, # LIM_Z_D (unconnected)
+            2: 1,  # LIM_X_C (GPIO 2, hardware 1.8k pull-up)
+            3: 1,  # LIM_Z_D (GPIO 3, hardware 1.8k pull-up)
+            27: 1, # 舊 LIM_X_C (已換至 GPIO 2)
+            22: 1, # 舊 LIM_Z_D (已換至 GPIO 3)
             23: 1, # LIM_Z_E
             6: 1,  # HALL_1 (pull-up HIGH when idle)
             7: 1,  # HALL_2
@@ -237,3 +239,4 @@ class TestHomingLogic(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

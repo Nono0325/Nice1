@@ -8,9 +8,9 @@ Raspberry Pi Stepper Motor & Electromagnet Controller
 1. X 軸: 步進馬達 (PUL: GPIO 12, DIR: GPIO 16, ENA: GPIO 20)
    - a 點 (左側歸零): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 17)
    - b 點 (中間模具工位): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 25)
-   - c 點 (向右極限/放料): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 27)
+   - c 點 (向右極限/放料): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN (GPIO 2 / 實體 Pin 3，具硬體 1.8k 上拉)
 2. Z 軸 (垂直升降，原 Y 軸改為 Z 軸): 步進馬達 (PUL: GPIO 13, DIR: GPIO 19, ENA: GPIO 26)
-   - d 點 (向上歸零/安全高度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 22)
+   - d 點 (向上歸零/安全高度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN (GPIO 3 / 實體 Pin 5，具硬體 1.8k 上拉)
    - e 點 (向下極限/取放深度): 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (GPIO 23)
 3. 末端手臂:
    - 圓形電磁鐵強吸力吸盤 LSD-P25/20 共 4 組 (吸力 8KG, Ø25×20mm, 經 4 組 TONGLING JQC-3FF-S-Z 5VDC 1路光耦隔離繼電器驅動 GPIO 24, 18, 14, 15)
@@ -89,15 +89,15 @@ PIN = {
     # 電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (經 817 光耦電壓隔離板轉接 -> 樹莓派內部上拉 PUD_UP 讀取為 LOW)
     'LIM_X_A':        17,   # a 點: X 軸歸零/左極限 (Row 1 - IO17)
     'LIM_X_B':        25,   # b 點: X 軸中間模具工位 (Row 2 - IO25) [新增接近開關]
-    'LIM_X_C':        27,   # c 點: X 軸向右極限 (Row 4 - IO27)
-    'LIM_Z_D':        22,   # d 點: Z 軸向上歸零 (Row 3 - IO22)
+    'LIM_X_C':        2,    # c 點: X 軸向右極限 (Pin 3 - GPIO 2，內建 1.8k 硬體上拉)
+    'LIM_Z_D':        3,    # d 點: Z 軸向上歸零 (Pin 5 - GPIO 3，內建 1.8k 硬體上拉)
     'LIM_Z_E':        23,   # e 點: Z 軸向下極限 (Row 3 - IO23)
 
     # 舊版限位名稱相容映射
     'LIM_LEFT':       17,
     'LIM_MID':        25,
-    'LIM_RIGHT':      27,
-    'LIM_UP':         22,
+    'LIM_RIGHT':      2,
+    'LIM_UP':         3,
     'LIM_DOWN':       23,
 
     # 末端金屬檢測霍爾感測陣列：8 顆霍爾開關，兩個一組 (共 4 組，搭配 8路 817 光耦電壓隔離板 / PC817 轉接模組)
@@ -168,8 +168,8 @@ state = {
     'lim_z_e':        False,  # e 點: Z 軸向下極限 (原 lim_down)
     'lim_x_a_active_high': False,
     'lim_x_b_active_high': False,
-    'lim_x_c_active_high': True,  # GPIO 27 (c點): NC/Active-HIGH
-    'lim_z_d_active_high': True,  # GPIO 22 (d點): NC/Active-HIGH
+    'lim_x_c_active_high': False,  # GPIO 2 (Pin 3, c點): NO/Active-LOW (或按需求切換)
+    'lim_z_d_active_high': False,  # GPIO 3 (Pin 5, d點): NO/Active-LOW (或按需求切換)
     'lim_z_e_active_high': False,
     # 末端金屬檢測霍爾感測陣列 (8 顆，兩個一組共 4 組)
     'hall_1': False, 'hall_2': False,  # 第 1 組 (G1)
@@ -784,8 +784,8 @@ def _execute_hardware_homing(target_axes):
         if not bool(state.get('lim_z_d_enabled', False)):
             return False
         zd_ah = bool(state.get('lim_z_d_active_high', False))
-        pin_22 = bool(GPIO.input(c['lim_pin']))
-        zd_hit = pin_22 if zd_ah else not pin_22
+        pin_val = bool(GPIO.input(c['lim_pin']))
+        zd_hit = pin_val if zd_ah else not pin_val
         s_hit = bool(state.get('lim_z_d') or state.get('lim_up'))
         return zd_hit or s_hit
 

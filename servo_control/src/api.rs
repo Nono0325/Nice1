@@ -818,6 +818,10 @@ pub async fn api_set_limits(
     }
 
     ctx.save_limits_config();
+    ctx.read_limit_switches();
+    let full_status = ctx.build_full_status_json(true);
+    ctx.emit_ws("state_update", full_status.clone());
+
     let s = ctx.state.read().unwrap().clone();
     ctx.add_history(
         format!(
@@ -829,6 +833,7 @@ pub async fn api_set_limits(
 
     Json(json!({
         "ok": true,
+        "state": full_status,
         "limits": {
             "x_min": s.x_min, "x_max": s.x_max,
             "z_min": s.z_min, "z_max": s.z_max,
@@ -991,11 +996,11 @@ pub async fn api_diagnose(State(ctx): State<Arc<AppContext>>) -> impl IntoRespon
         },
         "inductive_sensors": {
             "sensor_model": "QN-1805-E1 方形 DC10-30V 三線 NPN (支援 NO常開 / NC常閉 極性切換)",
-            "X_A": { "pin": 17, "name": "X軸a點(左歸零原點)", "triggered": s.lim_x_a, "active_high": s.lim_x_a_active_high },
-            "X_B": { "pin": 25, "name": "X軸b點(中間工位)", "triggered": s.lim_x_b, "active_high": s.lim_x_b_active_high },
-            "X_C": { "pin": 27, "name": "X軸c點(向右極限)", "triggered": s.lim_x_c, "active_high": s.lim_x_c_active_high },
-            "Z_D": { "pin": 22, "name": "Z軸d點(向上歸零)", "triggered": s.lim_z_d, "active_high": s.lim_z_d_active_high },
-            "Z_E": { "pin": 23, "name": "Z軸e點(向下極限)", "triggered": s.lim_z_e, "active_high": s.lim_z_e_active_high },
+            "X_A": { "pin": 17, "name": "X軸a點(左歸零原點)", "raw_level": s.raw_xa, "triggered": s.lim_x_a, "active_high": s.lim_x_a_active_high },
+            "X_B": { "pin": 25, "name": "X軸b點(中間工位)", "raw_level": s.raw_xb, "triggered": s.lim_x_b, "active_high": s.lim_x_b_active_high },
+            "X_C": { "pin": 27, "name": "X軸c點(向右極限)", "raw_level": s.raw_xc, "triggered": s.lim_x_c, "active_high": s.lim_x_c_active_high },
+            "Z_D": { "pin": 22, "name": "Z軸d點(向上歸零)", "raw_level": s.raw_zd, "triggered": s.lim_z_d, "active_high": s.lim_z_d_active_high },
+            "Z_E": { "pin": 23, "name": "Z軸e點(向下極限)", "raw_level": s.raw_ze, "triggered": s.lim_z_e, "active_high": s.lim_z_e_active_high },
         },
         "hall_sensors": {
             "optocoupler": "8路 817 光耦電壓隔離板 (PC817 電壓控制轉接模組)",

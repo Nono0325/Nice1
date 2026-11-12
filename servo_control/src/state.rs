@@ -122,6 +122,11 @@ pub struct SystemState {
     pub lim_z_d_active_high: bool,
     pub lim_z_e_active_high: bool,
     pub raw_hall_levels: Vec<u8>,
+    pub raw_xa: bool,
+    pub raw_xb: bool,
+    pub raw_xc: bool,
+    pub raw_zd: bool,
+    pub raw_ze: bool,
     pub press_done: bool,
 
     pub lim_left: bool,
@@ -241,6 +246,11 @@ impl SystemState {
             lim_z_d_active_high: true, // GPIO 22 (d點): NC/Active-HIGH, 未感應時為低電平，感應時為高電平
             lim_z_e_active_high: false,
             raw_hall_levels: vec![0; 8],
+            raw_xa: false,
+            raw_xb: false,
+            raw_xc: false,
+            raw_zd: false,
+            raw_ze: false,
             press_done: false,
             lim_left: false,
             lim_mid: false,
@@ -971,6 +981,11 @@ impl AppContext {
                 }
             }
             let mut s = self.state.write().unwrap();
+            s.raw_xa = raw_levels[0];
+            s.raw_xb = raw_levels[1];
+            s.raw_xc = raw_levels[2];
+            s.raw_zd = raw_levels[3];
+            s.raw_ze = raw_levels[4];
             s.lim_x_a = counts[0] >= 2;
             s.lim_x_b = counts[1] >= 2;
             s.lim_x_c = counts[2] >= 2;
@@ -995,6 +1010,11 @@ impl AppContext {
             s.lim_x_c = x_pos >= (s.x_max as f64) - 5.0;
             s.lim_z_e = z_pos <= (s.z_min as f64) + 5.0;
             s.lim_z_d = z_pos >= (s.z_max as f64) - 5.0;
+            s.raw_xa = s.lim_x_a;
+            s.raw_xb = s.lim_x_b;
+            s.raw_xc = s.lim_x_c;
+            s.raw_zd = s.lim_z_d;
+            s.raw_ze = s.lim_z_e;
 
             s.hall_1 = s.magnet_1;
             s.hall_2 = s.magnet_1;

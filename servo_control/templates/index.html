@@ -582,11 +582,12 @@
       <div class="card">
         <div class="card-title"><span class="icon">🔒</span>電感式接近開關 (QN-1805-E1 支援 NO常開 / NC常閉極性設定)</div>
         <table class="diag-table">
-          <thead><tr><th>開關位置 (工位)</th><th>GPIO</th><th>觸發極性</th><th>狀態</th><th>操作</th></tr></thead>
+          <thead><tr><th>開關位置 (工位)</th><th>GPIO</th><th>實體電平</th><th>觸發極性</th><th>狀態</th><th>操作</th></tr></thead>
           <tbody>
             <tr>
               <td>X 軸 a 點 (左歸零原點)</td>
               <td>GPIO 17</td>
+              <td><span class="tag tag-dim" id="raw-lim-a">-</span></td>
               <td><span class="tag tag-blue" id="pol-lim-a">NO (低電平)</span></td>
               <td><span class="tag" id="mon-limleft">正常</span></td>
               <td><button class="btn btn-secondary" style="padding:2px 8px;font-size:11px" onclick="toggleSensorPolarity('lim_x_a')">切換極性</button></td>
@@ -594,6 +595,7 @@
             <tr>
               <td>X 軸 b 點 (中間衝壓模具位)</td>
               <td>GPIO 25</td>
+              <td><span class="tag tag-dim" id="raw-lim-b">-</span></td>
               <td><span class="tag tag-blue" id="pol-lim-b">NO (低電平)</span></td>
               <td><span class="tag" id="mon-limmid">正常</span></td>
               <td><button class="btn btn-secondary" style="padding:2px 8px;font-size:11px" onclick="toggleSensorPolarity('lim_x_b')">切換極性</button></td>
@@ -601,6 +603,7 @@
             <tr>
               <td>X 軸 c 點 (向右極限放料位)</td>
               <td>GPIO 27</td>
+              <td><span class="tag tag-dim" id="raw-lim-c">-</span></td>
               <td><span class="tag tag-purple" id="pol-lim-c">NC (高電平)</span></td>
               <td><span class="tag" id="mon-limright">正常</span></td>
               <td><button class="btn btn-secondary" style="padding:2px 8px;font-size:11px" onclick="toggleSensorPolarity('lim_x_c')">切換極性</button></td>
@@ -608,6 +611,7 @@
             <tr>
               <td>Z 軸 d 點 (向上歸零安全高度)</td>
               <td>GPIO 22</td>
+              <td><span class="tag tag-dim" id="raw-lim-d">-</span></td>
               <td><span class="tag tag-purple" id="pol-lim-d">NC (高電平)</span></td>
               <td><span class="tag" id="mon-limup">正常</span></td>
               <td><button class="btn btn-secondary" style="padding:2px 8px;font-size:11px" onclick="toggleSensorPolarity('lim_z_d')">切換極性</button></td>
@@ -615,6 +619,7 @@
             <tr>
               <td>Z 軸 e 點 (向下極限取料面)</td>
               <td>GPIO 23</td>
+              <td><span class="tag tag-dim" id="raw-lim-e">-</span></td>
               <td><span class="tag tag-blue" id="pol-lim-e">NO (低電平)</span></td>
               <td><span class="tag" id="mon-limdown">正常</span></td>
               <td><button class="btn btn-secondary" style="padding:2px 8px;font-size:11px" onclick="toggleSensorPolarity('lim_z_e')">切換極性</button></td>

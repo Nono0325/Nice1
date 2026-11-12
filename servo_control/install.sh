@@ -141,10 +141,19 @@ else
         rm -rf "$REPO_DIR" 2>/dev/null || true
     fi
     if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
-        su - "$RUN_USER" -c "git clone --branch '${REPO_BRANCH}' --depth=1 '${REPO_URL}' '${REPO_DIR}'"
+        chown -R "${RUN_USER}:${RUN_USER}" "$RUN_HOME" 2>/dev/null || true
+        su - "$RUN_USER" -c "git clone --branch '${REPO_BRANCH}' --depth=1 '${REPO_URL}' '${REPO_DIR}'" || {
+            log_warn "Clone 失敗，正在清理目標目錄並重新嘗試..."
+            rm -rf "$REPO_DIR" 2>/dev/null || true
+            su - "$RUN_USER" -c "git clone --branch '${REPO_BRANCH}' --depth=1 '${REPO_URL}' '${REPO_DIR}'"
+        }
         chown -R "${RUN_USER}:${RUN_USER}" "$REPO_DIR" 2>/dev/null || true
     else
-        git clone --branch "$REPO_BRANCH" --depth=1 "$REPO_URL" "$REPO_DIR"
+        git clone --branch "$REPO_BRANCH" --depth=1 "$REPO_URL" "$REPO_DIR" || {
+            log_warn "Clone 失敗，正在清理目標目錄並重新嘗試..."
+            rm -rf "$REPO_DIR" 2>/dev/null || true
+            git clone --branch "$REPO_BRANCH" --depth=1 "$REPO_URL" "$REPO_DIR"
+        }
     fi
     CURRENT_COMMIT=$(cd "$REPO_DIR" && git log -1 --format="%h (%s)" 2>/dev/null || echo "Unknown")
     log_ok "倉庫下載成功，當前 Commit: ${CURRENT_COMMIT}"

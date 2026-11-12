@@ -624,6 +624,11 @@ def read_limit_switches():
                 if sample_idx < 2:
                     time.sleep(0.0001)
 
+            state['raw_xa'] = bool(GPIO.input(pins[0]))
+            state['raw_xb'] = bool(GPIO.input(pins[1]))
+            state['raw_xc'] = bool(GPIO.input(pins[2]))
+            state['raw_zd'] = bool(GPIO.input(pins[3]))
+            state['raw_ze'] = bool(GPIO.input(pins[4]))
             state['lim_x_a'] = readings[0] >= 2
             state['lim_x_b'] = readings[1] >= 2
             state['lim_x_c'] = readings[2] >= 2
@@ -2172,6 +2177,9 @@ def api_set_limits():
 
     if 'hall_active_high' in data:
         state['hall_active_high'] = bool(data['hall_active_high'])
+    for pol_k in ['lim_x_a_active_high', 'lim_x_b_active_high', 'lim_x_c_active_high', 'lim_z_d_active_high', 'lim_z_e_active_high']:
+        if pol_k in data:
+            state[pol_k] = bool(data[pol_k])
     
     # 優先更新比例參數（避免換算 mm 極限時使用舊 scale 或被 0 除）
     if 'x_scale' in data: 
@@ -2286,9 +2294,10 @@ def api_set_limits():
         state['z_max_mm'] = state['y_max_mm'] = round(state.get('z_min_mm', 0.0) + (state['z_max'] - state['z_min']) / max(0.001, scale), 1)
 
     save_limits_config()
+    read_limit_switches()
 
     add_history(f"更新行程範圍與參數: X({state['x_min']}~{state['x_max']}µs, {state['x_min_mm']}~{state['x_max_mm']}mm, 比例:{state['x_scale']}), Z/Y({state['z_min']}~{state['z_max']}µs, {state['z_min_mm']}~{state['z_max_mm']}mm, 比例:{state.get('z_scale', state['y_scale'])})", "success")
-    return jsonify({'ok': True, 'limits': {
+    return jsonify({'ok': True, 'state': state, 'limits': {
         'x_min': state['x_min'], 'x_max': state['x_max'],
         'z_min': state['z_min'], 'z_max': state['z_max'],
         'y_min': state['y_min'], 'y_max': state['y_max'],

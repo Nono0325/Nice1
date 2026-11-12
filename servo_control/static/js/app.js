@@ -615,6 +615,21 @@ function updateUI() {
   updateTag('mon-limup',    (s.lim_z_d || s.lim_up),    '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
   updateTag('mon-limdown',  (s.lim_z_e || s.lim_down),  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
 
+  const fmtRaw = (val) => val === undefined ? '-' : (val ? 'HIGH (3.3V)' : 'LOW (0V)');
+  const clsRaw = (val) => val ? 'tag tag-purple' : 'tag tag-blue';
+  const setRaw = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = fmtRaw(val);
+      el.className = clsRaw(val);
+    }
+  };
+  setRaw('raw-lim-a', s.raw_xa);
+  setRaw('raw-lim-b', s.raw_xb);
+  setRaw('raw-lim-c', s.raw_xc);
+  setRaw('raw-lim-d', s.raw_zd);
+  setRaw('raw-lim-e', s.raw_ze);
+
   const fmtPol = (ah) => ah ? 'NC (高電平)' : 'NO (低電平)';
   const clsPol = (ah) => ah ? 'tag tag-purple' : 'tag tag-blue';
   const setPol = (id, ah) => {
@@ -861,7 +876,11 @@ async function toggleSensorPolarity(sensorKey) {
     r = await apiPost('/api/settings', payload);
   }
   if (r && r.ok) {
-    state[fullKey] = nextVal;
+    if (r.state) {
+      state = { ...state, ...r.state };
+    } else {
+      state[fullKey] = nextVal;
+    }
     toast(`接近開關 ${sensorKey.toUpperCase()} 極性切換為: ${nextVal ? 'NC (高電平/開路觸發)' : 'NO (低電平觸發)'}`, 'success');
     addLog(`切換接近開關 ${sensorKey} 極性: ${nextVal ? 'NC' : 'NO'}`, 'info');
     updateUI();

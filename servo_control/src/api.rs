@@ -34,11 +34,71 @@ fn no_cache_headers() -> HeaderMap {
     headers
 }
 
+pub const EMBEDDED_INDEX_HTML: &str = include_str!("../templates/index.html");
+pub const EMBEDDED_STYLE_CSS: &str = include_str!("../static/css/style.css");
+pub const EMBEDDED_APP_JS: &str = include_str!("../static/js/app.js");
+
 pub async fn index_handler(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
     let index_path = ctx.base_dir.join("templates").join("index.html");
-    let html = std::fs::read_to_string(index_path)
-        .unwrap_or_else(|_| "<h1>Servo Controller UI Missing</h1>".to_string());
+    let html = std::fs::read_to_string(&index_path).unwrap_or_else(|_| {
+        let fallbacks = [
+            PathBuf::from("/home/nice-pi4/Nice1/servo_control/templates/index.html"),
+            PathBuf::from("/home/nice-pi4/Nice/servo_control/templates/index.html"),
+            PathBuf::from("/home/pi/Nice1/servo_control/templates/index.html"),
+            PathBuf::from("/home/pi/Nice/servo_control/templates/index.html"),
+        ];
+        for p in &fallbacks {
+            if let Ok(c) = std::fs::read_to_string(p) {
+                return c;
+            }
+        }
+        EMBEDDED_INDEX_HTML.to_string()
+    });
     (no_cache_headers(), Html(html))
+}
+
+pub async fn static_css_handler(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let css_path = ctx.base_dir.join("static").join("css").join("style.css");
+    let css = std::fs::read_to_string(&css_path).unwrap_or_else(|_| {
+        let fallbacks = [
+            PathBuf::from("/home/nice-pi4/Nice1/servo_control/static/css/style.css"),
+            PathBuf::from("/home/nice-pi4/Nice/servo_control/static/css/style.css"),
+            PathBuf::from("/home/pi/Nice1/servo_control/static/css/style.css"),
+            PathBuf::from("/home/pi/Nice/servo_control/static/css/style.css"),
+        ];
+        for p in &fallbacks {
+            if let Ok(c) = std::fs::read_to_string(p) {
+                return c;
+            }
+        }
+        EMBEDDED_STYLE_CSS.to_string()
+    });
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        css,
+    )
+}
+
+pub async fn static_js_handler(State(ctx): State<Arc<AppContext>>) -> impl IntoResponse {
+    let js_path = ctx.base_dir.join("static").join("js").join("app.js");
+    let js = std::fs::read_to_string(&js_path).unwrap_or_else(|_| {
+        let fallbacks = [
+            PathBuf::from("/home/nice-pi4/Nice1/servo_control/static/js/app.js"),
+            PathBuf::from("/home/nice-pi4/Nice/servo_control/static/js/app.js"),
+            PathBuf::from("/home/pi/Nice1/servo_control/static/js/app.js"),
+            PathBuf::from("/home/pi/Nice/servo_control/static/js/app.js"),
+        ];
+        for p in &fallbacks {
+            if let Ok(c) = std::fs::read_to_string(p) {
+                return c;
+            }
+        }
+        EMBEDDED_APP_JS.to_string()
+    });
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        js,
+    )
 }
 
 pub async fn ws_handler(

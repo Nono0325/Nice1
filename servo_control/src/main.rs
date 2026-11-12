@@ -36,6 +36,19 @@ fn resolve_base_dir() -> PathBuf {
             cur = dir.parent().map(|p| p.to_path_buf());
         }
     }
+    let candidates = [
+        cwd.join("Nice1").join("servo_control"),
+        cwd.join("Nice").join("servo_control"),
+        PathBuf::from("/home/nice-pi4/Nice1/servo_control"),
+        PathBuf::from("/home/nice-pi4/Nice/servo_control"),
+        PathBuf::from("/home/pi/Nice1/servo_control"),
+        PathBuf::from("/home/pi/Nice/servo_control"),
+    ];
+    for c in &candidates {
+        if c.join("templates").is_dir() && c.join("static").is_dir() {
+            return c.clone();
+        }
+    }
     cwd
 }
 
@@ -204,6 +217,8 @@ async fn async_main() {
 
     let app = Router::new()
         .route("/", get(api::index_handler))
+        .route("/static/css/style.css", get(api::static_css_handler))
+        .route("/static/js/app.js", get(api::static_js_handler))
         .route("/ws", get(api::ws_handler))
         .route("/api/status", get(api::api_status))
         .route("/api/move", post(api::api_move))

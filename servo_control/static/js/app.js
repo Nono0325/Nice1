@@ -615,6 +615,21 @@ function updateUI() {
   updateTag('mon-limup',    (s.lim_z_d || s.lim_up),    '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
   updateTag('mon-limdown',  (s.lim_z_e || s.lim_down),  '🔴 觸發', '✔ 正常', 'tag-red', 'tag-green');
 
+  const fmtPol = (ah) => ah ? 'NC (高電平)' : 'NO (低電平)';
+  const clsPol = (ah) => ah ? 'tag tag-purple' : 'tag tag-blue';
+  const setPol = (id, ah) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = fmtPol(ah);
+      el.className = clsPol(ah);
+    }
+  };
+  setPol('pol-lim-a', !!s.lim_x_a_active_high);
+  setPol('pol-lim-b', !!s.lim_x_b_active_high);
+  setPol('pol-lim-c', s.lim_x_c_active_high !== undefined ? !!s.lim_x_c_active_high : true);
+  setPol('pol-lim-d', s.lim_z_d_active_high !== undefined ? !!s.lim_z_d_active_high : true);
+  setPol('pol-lim-e', !!s.lim_z_e_active_high);
+
   // 訊號檢測 Tab
   const duty = (µs) => ((µs / 20000) * 100).toFixed(3);
   setElText('sig-x-pulse', s.x_pulse);
@@ -830,6 +845,25 @@ async function toggleHallPolarity() {
     state.hall_active_high = nextHigh;
     toast(`霍爾模組極性已切換為：${nextHigh ? 'Active-HIGH (3.3V 高電平觸發)' : 'Active-LOW (0V 低電平觸發)'}`, 'success');
     addLog(`切換霍爾極性: ${nextHigh ? 'HIGH' : 'LOW'}`, 'info');
+    updateUI();
+  }
+}
+
+async function toggleSensorPolarity(sensorKey) {
+  const fullKey = `${sensorKey}_active_high`;
+  const defaultHigh = (sensorKey === 'lim_x_c' || sensorKey === 'lim_z_d');
+  const currentVal = state[fullKey] !== undefined ? !!state[fullKey] : defaultHigh;
+  const nextVal = !currentVal;
+  const payload = {};
+  payload[fullKey] = nextVal;
+  let r = await apiPost('/api/set_limits', payload);
+  if (!r || !r.ok) {
+    r = await apiPost('/api/settings', payload);
+  }
+  if (r && r.ok) {
+    state[fullKey] = nextVal;
+    toast(`接近開關 ${sensorKey.toUpperCase()} 極性切換為: ${nextVal ? 'NC (高電平/開路觸發)' : 'NO (低電平觸發)'}`, 'success');
+    addLog(`切換接近開關 ${sensorKey} 極性: ${nextVal ? 'NC' : 'NO'}`, 'info');
     updateUI();
   }
 }

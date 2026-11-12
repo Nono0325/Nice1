@@ -116,6 +116,11 @@ pub struct SystemState {
     pub hall_group_count: usize,
     pub hall_arm_metal: bool,
     pub hall_active_high: bool,
+    pub lim_x_a_active_high: bool,
+    pub lim_x_b_active_high: bool,
+    pub lim_x_c_active_high: bool,
+    pub lim_z_d_active_high: bool,
+    pub lim_z_e_active_high: bool,
     pub raw_hall_levels: Vec<u8>,
     pub press_done: bool,
 
@@ -230,6 +235,11 @@ impl SystemState {
             hall_group_count: 0,
             hall_arm_metal: false,
             hall_active_high: true,
+            lim_x_a_active_high: false,
+            lim_x_b_active_high: false,
+            lim_x_c_active_high: true, // GPIO 27 (c點): NC/Active-HIGH, 未感應時為低電平，感應時為高電平
+            lim_z_d_active_high: true, // GPIO 22 (d點): NC/Active-HIGH, 未感應時為低電平，感應時為高電平
+            lim_z_e_active_high: false,
             raw_hall_levels: vec![0; 8],
             press_done: false,
             lim_left: false,
@@ -743,6 +753,11 @@ impl AppContext {
                 if let Some(v) = cfg.get("homing_speed_hz").and_then(|v| v.as_f64()) { s.homing_speed_hz = v; }
                 if let Some(v) = cfg.get("y_sync").and_then(|v| v.as_bool()) { s.y_sync = v; s.z_sync = v; }
                 if let Some(v) = cfg.get("hall_active_high").and_then(|v| v.as_bool()) { s.hall_active_high = v; }
+                if let Some(v) = cfg.get("lim_x_a_active_high").and_then(|v| v.as_bool()) { s.lim_x_a_active_high = v; }
+                if let Some(v) = cfg.get("lim_x_b_active_high").and_then(|v| v.as_bool()) { s.lim_x_b_active_high = v; }
+                if let Some(v) = cfg.get("lim_x_c_active_high").and_then(|v| v.as_bool()) { s.lim_x_c_active_high = v; }
+                if let Some(v) = cfg.get("lim_z_d_active_high").and_then(|v| v.as_bool()) { s.lim_z_d_active_high = v; }
+                if let Some(v) = cfg.get("lim_z_e_active_high").and_then(|v| v.as_bool()) { s.lim_z_e_active_high = v; }
             }
         }
     }
@@ -783,6 +798,11 @@ impl AppContext {
             "homing_speed_hz": s.homing_speed_hz,
             "y_sync": s.y_sync,
             "hall_active_high": s.hall_active_high,
+            "lim_x_a_active_high": s.lim_x_a_active_high,
+            "lim_x_b_active_high": s.lim_x_b_active_high,
+            "lim_x_c_active_high": s.lim_x_c_active_high,
+            "lim_z_d_active_high": s.lim_z_d_active_high,
+            "lim_z_e_active_high": s.lim_z_e_active_high,
         });
         if let Ok(json_str) = serde_json::to_string_pretty(&cfg) {
             let _ = fs::write(self.limits_file(), json_str);
@@ -914,18 +934,33 @@ impl AppContext {
                 6, 7, 8, 9, 10, 11, 4, 21, // HALL_1..8
                 5, // PRESS_DONE
             ];
-            let active_high = self.state.read().unwrap().hall_active_high;
+            let (ah_hall, ah_xa, ah_xb, ah_xc, ah_zd, ah_ze) = {
+                let s_r = self.state.read().unwrap();
+                (
+                    s_r.hall_active_high,
+                    s_r.lim_x_a_active_high,
+                    s_r.lim_x_b_active_high,
+                    s_r.lim_x_c_active_high,
+                    s_r.lim_z_d_active_high,
+                    s_r.lim_z_e_active_high,
+                )
+            };
             let mut raw_levels = [false; 14];
             let mut counts = [0u8; 14];
             for sample in 0..3 {
                 for (i, &pin) in pins.iter().enumerate() {
                     let is_high = self.gpio.read_pin(pin);
                     raw_levels[i] = is_high;
-                    // 霍爾模組 (5..12) 根據 active_high 判斷 (true = HIGH 觸發, false = LOW 觸發)
-                    let is_triggered = if (5..=12).contains(&i) {
-                        if active_high { is_high } else { !is_high }
-                    } else {
-                        !is_high
+                    // 各輸入腳位依據獨立配置的電平極性判定觸發 (active_high = true 表示高電平/開路觸發)
+                    let is_triggered = match i {
+                        0 => if ah_xa { is_high } else { !is_high }, // GPIO 17 (a點)
+                        1 => if ah_xb { is_high } else { !is_high }, // GPIO 25 (b點)
+                        2 => if ah_xc { is_high } else { !is_high }, // GPIO 27 (c點: 支援NC/Active-HIGH)
+                        3 => if ah_zd { is_high } else { !is_high }, // GPIO 22 (d點: 支援NC/Active-HIGH)
+                        4 => if ah_ze { is_high } else { !is_high }, // GPIO 23 (e點)
+                        5..=12 => if ah_hall { is_high } else { !is_high }, // 霍爾 1..8
+                        13 => !is_high, // 衝壓完成訊號 PRESS_DONE
+                        _ => !is_high,
                     };
                     if is_triggered {
                         counts[i] += 1;

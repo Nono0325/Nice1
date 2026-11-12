@@ -160,12 +160,17 @@ state = {
     'vacuum':   False,                 # 相容舊版名稱
     'z_down':   False,
 
-    # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 常開）
+    # 數位輸入（電感式接近開關 QN-1805-E1 方形 DC10-30V 三線 NPN 支援 NO/NC）
     'lim_x_a':        False,  # a 點: X 軸歸零 (原 lim_left)
     'lim_x_b':        False,  # b 點: X 軸中間工位 [新增]
     'lim_x_c':        False,  # c 點: X 軸向右極限 (原 lim_right)
     'lim_z_d':        False,  # d 點: Z 軸向上歸零 (原 lim_up)
     'lim_z_e':        False,  # e 點: Z 軸向下極限 (原 lim_down)
+    'lim_x_a_active_high': False,
+    'lim_x_b_active_high': False,
+    'lim_x_c_active_high': True,  # GPIO 27 (c點): NC/Active-HIGH
+    'lim_z_d_active_high': True,  # GPIO 22 (d點): NC/Active-HIGH
+    'lim_z_e_active_high': False,
     # 末端金屬檢測霍爾感測陣列 (8 顆，兩個一組共 4 組)
     'hall_1': False, 'hall_2': False,  # 第 1 組 (G1)
     'hall_3': False, 'hall_4': False,  # 第 2 組 (G2)
@@ -375,14 +380,17 @@ class StepperMotor:
                             state['x_homed'] = True
                             time.sleep(0.01)
                             continue
-                        if diff > 0 and not GPIO.input(PIN['LIM_X_C']):
+                        xc_ah = bool(state.get('lim_x_c_active_high', True))
+                        lim_c_hit = bool(GPIO.input(PIN['LIM_X_C'])) if xc_ah else not GPIO.input(PIN['LIM_X_C'])
+                        if diff > 0 and lim_c_hit:
                             self.halt()
                             state['lim_x_c'] = True
                             state['lim_right'] = True
                             time.sleep(0.01)
                             continue
                     else: # z or y
-                        lim_origin_hit = not GPIO.input(PIN['LIM_Z_D'])
+                        zd_ah = bool(state.get('lim_z_d_active_high', True))
+                        lim_origin_hit = bool(GPIO.input(PIN['LIM_Z_D'])) if zd_ah else not GPIO.input(PIN['LIM_Z_D'])
                         if diff < 0 and lim_origin_hit:
                             self.halt()
                             self.current_pos = 0.0
@@ -588,12 +596,29 @@ def read_limit_switches():
                 PIN['PRESS_DONE']
             ]
             ah = bool(state.get('hall_active_high', True))
+            xa_ah = bool(state.get('lim_x_a_active_high', False))
+            xb_ah = bool(state.get('lim_x_b_active_high', False))
+            xc_ah = bool(state.get('lim_x_c_active_high', True))
+            zd_ah = bool(state.get('lim_z_d_active_high', True))
+            ze_ah = bool(state.get('lim_z_e_active_high', False))
             readings = [0] * len(pins)
             for sample_idx in range(3):
                 for i, p in enumerate(pins):
-                    val = GPIO.input(p)
-                    # 霍爾 (5..12) 根據 ah 判斷：ah 為 True 時高電平為觸發 (沒感應滅燈，感應到亮燈)
-                    is_trig = bool(val) if (5 <= i <= 12 and ah) else (not val)
+                    val = bool(GPIO.input(p))
+                    if i == 0:
+                        is_trig = val if xa_ah else not val
+                    elif i == 1:
+                        is_trig = val if xb_ah else not val
+                    elif i == 2:
+                        is_trig = val if xc_ah else not val
+                    elif i == 3:
+                        is_trig = val if zd_ah else not val
+                    elif i == 4:
+                        is_trig = val if ze_ah else not val
+                    elif 5 <= i <= 12:
+                        is_trig = val if ah else not val
+                    else:
+                        is_trig = not val
                     if is_trig:
                         readings[i] += 1
                 if sample_idx < 2:
@@ -701,8 +726,11 @@ def _execute_hardware_homing(target_axes):
     # ── 階段 A: 預先檢查 - 若原先已壓在接近開關或霍爾模組上，先慢速退開 ────
     def _is_sensor_active(c):
         if c['name'] == 'x':
-            return not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or not GPIO.input(c['lim_pin'])
-        return not GPIO.input(c['lim_pin'])
+            xa_ah = bool(state.get('lim_x_a_active_high', False))
+            xa_hit = bool(GPIO.input(c['lim_pin'])) if xa_ah else not GPIO.input(c['lim_pin'])
+            return not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or xa_hit
+        zd_ah = bool(state.get('lim_z_d_active_high', True))
+        return bool(GPIO.input(c['lim_pin'])) if zd_ah else not GPIO.input(c['lim_pin'])
 
     for cfg in axis_configs:
         if _is_sensor_active(cfg):

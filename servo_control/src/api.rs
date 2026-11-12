@@ -185,10 +185,14 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
     };
 
     let is_pi = ctx.is_raspberry_pi;
-    let hw_lim_xa = lim_xa || (is_pi && (!ctx.gpio.read_pin(17) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
-    let hw_lim_xc = lim_xc || (is_pi && !ctx.gpio.read_pin(27));
-    let hw_lim_zd = lim_zd || (is_pi && !ctx.gpio.read_pin(22));
-    let hw_lim_ze = lim_ze || (is_pi && !ctx.gpio.read_pin(23));
+    let (hall_ah, xa_ah, xc_ah, zd_ah, ze_ah) = {
+        let s = ctx.state.read().unwrap();
+        (s.hall_active_high, s.lim_x_a_active_high, s.lim_x_c_active_high, s.lim_z_d_active_high, s.lim_z_e_active_high)
+    };
+    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || ctx.gpio.is_pin_active_debounced(6, hall_ah) || ctx.gpio.is_pin_active_debounced(7, hall_ah)));
+    let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_debounced(27, xc_ah));
+    let hw_lim_zd = lim_zd || (is_pi && ctx.gpio.is_pin_active_debounced(22, zd_ah));
+    let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_debounced(23, ze_ah));
 
     if axis == "x" {
         if hw_lim_xa && delta < 0.0 {
@@ -260,10 +264,14 @@ pub async fn api_move(
     }));
 
     let is_pi = ctx.is_raspberry_pi;
-    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_low_debounced(17) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7)));
-    let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_low_debounced(27));
-    let hw_lim_zd = lim_zd || (is_pi && ctx.gpio.is_pin_active_low_debounced(22));
-    let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_low_debounced(23));
+    let (hall_ah, xa_ah, xc_ah, zd_ah, ze_ah) = {
+        let s = ctx.state.read().unwrap();
+        (s.hall_active_high, s.lim_x_a_active_high, s.lim_x_c_active_high, s.lim_z_d_active_high, s.lim_z_e_active_high)
+    };
+    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || ctx.gpio.is_pin_active_debounced(6, hall_ah) || ctx.gpio.is_pin_active_debounced(7, hall_ah)));
+    let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_debounced(27, xc_ah));
+    let hw_lim_zd = lim_zd || (is_pi && ctx.gpio.is_pin_active_debounced(22, zd_ah));
+    let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_debounced(23, ze_ah));
 
     if axis == "x" {
         if let Some(d) = delta_mm {
@@ -770,6 +778,21 @@ pub async fn api_set_limits(
         if let Some(v) = data.get("hall_active_high").and_then(|v| v.as_bool()) {
             s.hall_active_high = v;
         }
+        if let Some(v) = data.get("lim_x_a_active_high").and_then(|v| v.as_bool()) {
+            s.lim_x_a_active_high = v;
+        }
+        if let Some(v) = data.get("lim_x_b_active_high").and_then(|v| v.as_bool()) {
+            s.lim_x_b_active_high = v;
+        }
+        if let Some(v) = data.get("lim_x_c_active_high").and_then(|v| v.as_bool()) {
+            s.lim_x_c_active_high = v;
+        }
+        if let Some(v) = data.get("lim_z_d_active_high").and_then(|v| v.as_bool()) {
+            s.lim_z_d_active_high = v;
+        }
+        if let Some(v) = data.get("lim_z_e_active_high").and_then(|v| v.as_bool()) {
+            s.lim_z_e_active_high = v;
+        }
 
         if data.get("x_scale").is_some() && x_min_mm_in.is_none() && x_max_mm_in.is_none() {
             s.x_max_mm = ((s.x_min_mm + (s.x_max - s.x_min) as f64 / s.x_scale.max(0.001)) * 10.0)
@@ -961,12 +984,12 @@ pub async fn api_diagnose(State(ctx): State<Arc<AppContext>>) -> impl IntoRespon
             "Z_DOWN": { "pin": 25, "state": s.z_down },
         },
         "inductive_sensors": {
-            "sensor_model": "QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (檢測距離 5mm)",
-            "X_A": { "pin": 17, "name": "X軸a點(左歸零原點)", "triggered": s.lim_x_a },
-            "X_B": { "pin": 25, "name": "X軸b點(中間工位)", "triggered": s.lim_x_b },
-            "X_C": { "pin": 27, "name": "X軸c點(向右極限)", "triggered": s.lim_x_c },
-            "Z_D": { "pin": 22, "name": "Z軸d點(向上歸零)", "triggered": s.lim_z_d },
-            "Z_E": { "pin": 23, "name": "Z軸e點(向下極限)", "triggered": s.lim_z_e },
+            "sensor_model": "QN-1805-E1 方形 DC10-30V 三線 NPN (支援 NO常開 / NC常閉 極性切換)",
+            "X_A": { "pin": 17, "name": "X軸a點(左歸零原點)", "triggered": s.lim_x_a, "active_high": s.lim_x_a_active_high },
+            "X_B": { "pin": 25, "name": "X軸b點(中間工位)", "triggered": s.lim_x_b, "active_high": s.lim_x_b_active_high },
+            "X_C": { "pin": 27, "name": "X軸c點(向右極限)", "triggered": s.lim_x_c, "active_high": s.lim_x_c_active_high },
+            "Z_D": { "pin": 22, "name": "Z軸d點(向上歸零)", "triggered": s.lim_z_d, "active_high": s.lim_z_d_active_high },
+            "Z_E": { "pin": 23, "name": "Z軸e點(向下極限)", "triggered": s.lim_z_e, "active_high": s.lim_z_e_active_high },
         },
         "hall_sensors": {
             "optocoupler": "8路 817 光耦電壓隔離板 (PC817 電壓控制轉接模組)",

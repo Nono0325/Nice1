@@ -991,18 +991,21 @@ impl AppContext {
             .count();
         s.hall_arm_metal = s.hall_group_count > 0 || s.hall_active_count > 0;
 
-        // X 軸右側原點：實體霍爾模組 (HALL_1/2/5/7) 或接近開關 LIM_X_C (GPIO 27)
-        let hall_x_origin = s.hall_1 || s.hall_2 || s.hall_5 || s.hall_7 || s.hall_group_1 || s.hall_group_3 || s.hall_group_4;
-        s.lim_x_c = s.lim_x_c || hall_x_origin;
-        s.lim_right = s.lim_x_c;
+        // X 軸 a 點：實體霍爾模組 (HALL_1/HALL_2/Group 1) 或接近開關 LIM_X_A (GPIO 17)
+        let hall_a_origin = s.hall_1 || s.hall_2 || s.hall_group_1;
+        s.lim_x_a = s.lim_x_a || hall_a_origin;
         s.lim_left = s.lim_x_a;
+
+        // X 軸 b 點：接近開關 LIM_X_B (GPIO 25)
         s.lim_mid = s.lim_x_b;
 
-        // Y 軸（Z 軸）向上原點：實體霍爾模組 (HALL_3/4/6/8) 或接近開關 LIM_Z_D (GPIO 22)
-        let hall_z_origin = s.hall_3 || s.hall_4 || s.hall_6 || s.hall_8 || s.hall_group_2;
-        s.lim_z_d = s.lim_z_d || hall_z_origin;
+        // X 軸 c 點：接近開關 LIM_X_C (GPIO 27) - 獨立檢測，不混入 A 點霍爾
+        s.lim_right = s.lim_x_c;
+
+        // Z 軸 d 點（向上安全高度）：接近開關 LIM_Z_D (GPIO 22) - 獨立檢測，不混入末端霍爾
         s.lim_up = s.lim_z_d;
 
+        // Z 軸 e 點（向下極限）：接近開關 LIM_Z_E (GPIO 23)
         s.lim_down = s.lim_z_e;
         s.hall_metal = s.hall_arm_metal;
     }

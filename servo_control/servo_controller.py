@@ -363,26 +363,26 @@ class StepperMotor:
                 # 即時感測器硬體防撞與原點觸發歸零保護（每次步進前直接硬體讀取）
                 if IS_RASPBERRY_PI:
                     if self.name == 'x':
-                        lim_a_hit = not GPIO.input(PIN['LIM_X_A']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
-                        if diff < 0 and lim_a_hit:
+                        if diff < 0 and not GPIO.input(PIN['LIM_X_C']):
                             self.halt()
                             self.current_pos = 0.0
-                            state['lim_x_a'] = True
-                            state['lim_left'] = True
+                            state['lim_x_c'] = True
+                            state['lim_right'] = True
                             state['x_pulse'] = 0
                             state['x_mm'] = 0.0
                             state['x_pct'] = 0.0
                             state['x_homed'] = True
                             time.sleep(0.01)
                             continue
-                        if diff > 0 and not GPIO.input(PIN['LIM_X_C']):
+                        lim_a_hit = not GPIO.input(PIN['LIM_X_A']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+                        if diff > 0 and lim_a_hit:
                             self.halt()
-                            state['lim_x_c'] = True
-                            state['lim_right'] = True
+                            state['lim_x_a'] = True
+                            state['lim_left'] = True
                             time.sleep(0.01)
                             continue
                     else: # z or y
-                        lim_origin_hit = not GPIO.input(PIN['LIM_Z_D']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+                        lim_origin_hit = not GPIO.input(PIN['LIM_Z_D'])
                         if diff < 0 and lim_origin_hit:
                             self.halt()
                             self.current_pos = 0.0
@@ -637,14 +637,13 @@ def read_limit_switches():
         # 當任一組完整觸發 (或有霍爾感應到金屬) 時，判定金屬在位
         state['hall_arm_metal'] = bool(state['hall_group_count'] > 0 or state['hall_active_count'] > 0)
 
-        # X 軸原點（左側）：霍爾模組 (HALL_1 / HALL_2 / Group 1) 或 LIM_X_A
+        # X 軸原點（a點左側）：實體霍爾模組 (HALL_1 / HALL_2 / Group 1) 或 LIM_X_A
         state['lim_x_a'] = bool(state['lim_x_a'] or state['hall_1'] or state['hall_2'] or state['hall_group_1'])
         state['lim_left'] = state['lim_x_a']
         state['lim_mid'] = state['lim_x_b']
         state['lim_right'] = state['lim_x_c']
 
-        # Y/Z 軸頂部原點（向上）：霍爾模組 (HALL_3 / HALL_4 / Group 2) 或 LIM_Z_D
-        state['lim_z_d'] = bool(state['lim_z_d'] or state['hall_3'] or state['hall_4'] or state['hall_group_2'])
+        # Y/Z 軸頂部原點（d點向上）：僅接近開關 LIM_Z_D（不混入末端霍爾）
         state['lim_up'] = state['lim_z_d']
         state['lim_down'] = state['lim_z_e']
         state['hall_metal'] = state['hall_arm_metal']
@@ -754,23 +753,13 @@ def _execute_hardware_homing(target_axes):
 
         for cfg in axis_configs:
             if not cfg['triggered']:
-                ah = bool(state.get('hall_active_high', False))
-                hall_hit = False
-                target_hall_pins = ['HALL_1', 'HALL_2', 'HALL_5', 'HALL_7', 'HALL_3', 'HALL_4', 'HALL_6', 'HALL_8']
-                for p_name in target_hall_pins:
-                    p = PIN.get(p_name)
-                    if p is not None:
-                        val = bool(GPIO.input(p))
-                        if val if ah else (not val):
-                            hall_hit = True
-                            break
-                pin_triggered = (not GPIO.input(cfg['lim_pin'])) or hall_hit
+                pin_triggered = not GPIO.input(cfg['lim_pin'])
                 if pin_triggered:
                     cfg['triggered'] = True
                     cfg['sensor_hit'] = True
                     cfg['stepper'].set_position(0.0)
                     state[cfg['state_key']] = True
-                    add_history(f"{cfg['name'].upper()} 軸碰觸霍爾模組原點，捕獲原點 (0.0 mm)！", "info")
+                    add_history(f"{cfg['name'].upper()} 軸碰觸接近開關原點，捕獲原點 (0.0 mm)！", "info")
                 else:
                     GPIO.output(cfg['pul_pin'], GPIO.HIGH)
                     active_pulse.append(cfg)

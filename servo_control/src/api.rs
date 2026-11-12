@@ -185,9 +185,9 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
     };
 
     let is_pi = ctx.is_raspberry_pi;
-    let hw_lim_xa = lim_xa || (is_pi && !ctx.gpio.read_pin(17));
-    let hw_lim_xc = lim_xc || (is_pi && (!ctx.gpio.read_pin(27) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
-    let hw_lim_zd = lim_zd || (is_pi && (!ctx.gpio.read_pin(22) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7) || !ctx.gpio.read_pin(8) || !ctx.gpio.read_pin(9)));
+    let hw_lim_xa = lim_xa || (is_pi && (!ctx.gpio.read_pin(17) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
+    let hw_lim_xc = lim_xc || (is_pi && !ctx.gpio.read_pin(27));
+    let hw_lim_zd = lim_zd || (is_pi && !ctx.gpio.read_pin(22));
     let hw_lim_ze = lim_ze || (is_pi && !ctx.gpio.read_pin(23));
 
     if axis == "x" {
@@ -260,9 +260,9 @@ pub async fn api_move(
     }));
 
     let is_pi = ctx.is_raspberry_pi;
-    let hw_lim_xa = lim_xa || (is_pi && ctx.gpio.is_pin_active_low_debounced(17));
-    let hw_lim_xc = lim_xc || (is_pi && (ctx.gpio.is_pin_active_low_debounced(27) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7)));
-    let hw_lim_zd = lim_zd || (is_pi && (ctx.gpio.is_pin_active_low_debounced(22) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7) || ctx.gpio.is_pin_active_low_debounced(8) || ctx.gpio.is_pin_active_low_debounced(9)));
+    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_low_debounced(17) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7)));
+    let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_low_debounced(27));
+    let hw_lim_zd = lim_zd || (is_pi && ctx.gpio.is_pin_active_low_debounced(22));
     let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_low_debounced(23));
 
     if axis == "x" {

@@ -662,8 +662,12 @@ def read_limit_switches():
         # 當任一組完整觸發 (或有霍爾感應到金屬) 時，判定金屬在位
         state['hall_arm_metal'] = bool(state['hall_group_count'] > 0 or state['hall_active_count'] > 0)
 
-        # X 軸原點（a點左側）：實體霍爾模組 (HALL_1 / HALL_2 / Group 1) 或 LIM_X_A
-        state['lim_x_a'] = bool(state['lim_x_a'] or state['hall_1'] or state['hall_2'] or state['hall_group_1'])
+        # X 軸原點（a點左側）：實體霍爾模組 (HALL 1..8 全覆蓋) 或 LIM_X_A
+        state['lim_x_a'] = bool(
+            state['lim_x_a']
+            or any(state.get(f'hall_{i}') for i in range(1, 9))
+            or state.get('hall_arm_metal')
+        )
         state['lim_left'] = state['lim_x_a']
         state['lim_mid'] = state['lim_x_b']
         state['lim_right'] = state['lim_x_c']
@@ -728,9 +732,18 @@ def _execute_hardware_homing(target_axes):
         if c['name'] == 'x':
             xa_ah = bool(state.get('lim_x_a_active_high', False))
             xa_hit = bool(GPIO.input(c['lim_pin'])) if xa_ah else not GPIO.input(c['lim_pin'])
-            return not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or xa_hit
+            hall_ah = bool(state.get('hall_active_high', True))
+            hall_pins = [PIN.get(f'HALL_{i}') for i in range(1, 9)]
+            hall_hit = any(
+                (bool(GPIO.input(p)) if hall_ah else not GPIO.input(p))
+                for p in hall_pins if p is not None
+            )
+            s_hit = bool(state.get('lim_x_a') or state.get('lim_left') or state.get('hall_arm_metal') or state.get('hall_active_count', 0) > 0)
+            return xa_hit or hall_hit or s_hit
         zd_ah = bool(state.get('lim_z_d_active_high', True))
-        return bool(GPIO.input(c['lim_pin'])) if zd_ah else not GPIO.input(c['lim_pin'])
+        zd_hit = bool(GPIO.input(c['lim_pin'])) if zd_ah else not GPIO.input(c['lim_pin'])
+        s_hit = bool(state.get('lim_z_d') or state.get('lim_up'))
+        return zd_hit or s_hit
 
     for cfg in axis_configs:
         if _is_sensor_active(cfg):

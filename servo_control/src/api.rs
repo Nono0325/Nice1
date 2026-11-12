@@ -189,7 +189,10 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
         let s = ctx.state.read().unwrap();
         (s.hall_active_high, s.lim_x_a_active_high, s.lim_x_c_active_high, s.lim_z_d_active_high, s.lim_z_e_active_high)
     };
-    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || ctx.gpio.is_pin_active_debounced(6, hall_ah) || ctx.gpio.is_pin_active_debounced(7, hall_ah)));
+    let hall_a_hit = [6u8, 7, 8, 9, 10, 11, 4, 21]
+        .iter()
+        .any(|&p| ctx.gpio.is_pin_active_debounced(p, hall_ah));
+    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || hall_a_hit));
     let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_debounced(27, xc_ah));
     let hw_lim_zd = lim_zd || (is_pi && ctx.gpio.is_pin_active_debounced(22, zd_ah));
     let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_debounced(23, ze_ah));
@@ -268,7 +271,10 @@ pub async fn api_move(
         let s = ctx.state.read().unwrap();
         (s.hall_active_high, s.lim_x_a_active_high, s.lim_x_c_active_high, s.lim_z_d_active_high, s.lim_z_e_active_high)
     };
-    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || ctx.gpio.is_pin_active_debounced(6, hall_ah) || ctx.gpio.is_pin_active_debounced(7, hall_ah)));
+    let hall_a_hit = [6u8, 7, 8, 9, 10, 11, 4, 21]
+        .iter()
+        .any(|&p| ctx.gpio.is_pin_active_debounced(p, hall_ah));
+    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_debounced(17, xa_ah) || hall_a_hit));
     let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_debounced(27, xc_ah));
     let hw_lim_zd = lim_zd || (is_pi && ctx.gpio.is_pin_active_debounced(22, zd_ah));
     let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_debounced(23, ze_ah));

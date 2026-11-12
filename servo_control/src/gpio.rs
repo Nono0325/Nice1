@@ -301,10 +301,17 @@ impl StepperMotor {
                         (s.hall_active_high, s.lim_x_a_active_high, s.lim_x_c_active_high, s.lim_z_d_active_high, s.lim_z_e_active_high)
                     };
                     if motor.name == "x" {
-                        // X 軸向左 a 點原點保護 (GPIO 17 LIM_X_A 或 A 點霍爾模組 6, 7)
+                        // X 軸向左 a 點原點保護 (GPIO 17 LIM_X_A 或 A 點霍爾模組 1..8 全覆蓋，或狀態已觸發)
+                        let hall_hit = [6u8, 7, 8, 9, 10, 11, 4, 21]
+                            .iter()
+                            .any(|&p| motor.gpio.is_pin_active_debounced(p, hall_ah));
+                        let s_hit = {
+                            let s = ctx.state.read().unwrap();
+                            s.lim_x_a || s.lim_left || s.hall_arm_metal || s.hall_active_count > 0
+                        };
                         let lim_a_hit = motor.gpio.is_pin_active_debounced(17, xa_ah)
-                            || motor.gpio.is_pin_active_debounced(6, hall_ah)
-                            || motor.gpio.is_pin_active_debounced(7, hall_ah);
+                            || hall_hit
+                            || s_hit;
                         if diff < 0.0 && lim_a_hit {
                             motor.halt();
                             // 觸發 a 點原點立即自動校準歸零坐標點
@@ -434,14 +441,21 @@ impl StepperMotor {
                     if !dir_positive {
                         // 往後/原點方向 (向 a 點 或 向 d 點)
                         if motor.name == "x" {
-                            // X 軸向左 A 點移動：檢測 A 點接近開關 (GPIO 17) 與 A 點霍爾模組 (GPIO 6, 7)
+                            // X 軸向左 A 點移動：檢測 A 點接近開關 (GPIO 17) 與 A 點霍爾模組 (1..8 全覆蓋)
                             let (hall_ah, xa_ah) = {
                                 let s = ctx.state.read().unwrap();
                                 (s.hall_active_high, s.lim_x_a_active_high)
                             };
+                            let hall_hit = [6u8, 7, 8, 9, 10, 11, 4, 21]
+                                .iter()
+                                .any(|&p| motor.gpio.is_pin_active_debounced(p, hall_ah));
+                            let s_hit = {
+                                let s = ctx.state.read().unwrap();
+                                s.lim_x_a || s.lim_left || s.hall_arm_metal || s.hall_active_count > 0
+                            };
                             if motor.gpio.is_pin_active_debounced(17, xa_ah)
-                                || motor.gpio.is_pin_active_debounced(6, hall_ah)
-                                || motor.gpio.is_pin_active_debounced(7, hall_ah)
+                                || hall_hit
+                                || s_hit
                             {
                                 hit_limit_stop = true;
                                 break;
@@ -649,13 +663,36 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
 
     let check_sensor = |cfg: &HomingCfg| -> bool {
         if cfg.name == "x" {
-            // X 軸向左歸零至 a 點：檢測 a 點接近開關 (GPIO 17) 或 a 點霍爾模組 (GPIO 6, 7)
-            ctx.gpio.is_pin_active_debounced(17, xa_ah)
-                || ctx.gpio.is_pin_active_debounced(6, active_high)
-                || ctx.gpio.is_pin_active_debounced(7, active_high)
+            // 1. 全域背景狀態檢測 (若 20ms 取樣迴圈或 WebSocket 已標記觸發，立即定標煞停)
+            {
+                let s = ctx.state.read().unwrap();
+                if s.lim_x_a || s.lim_left || s.hall_arm_metal || s.hall_active_count > 0 {
+                    return true;
+                }
+            }
+
+            // 2. 檢測接近開關 (GPIO 17)
+            if ctx.gpio.is_pin_active_debounced(17, xa_ah)
                 || ctx.gpio.is_pin_active_debounced(cfg.lim_pin, xa_ah)
+            {
+                return true;
+            }
+
+            // 3. 檢測所有 8 顆霍爾開關 (覆蓋 A 點 G1~G4 所有可能接線腳位 6,7,8,9,10,11,4,21)
+            for &pin in &[6u8, 7, 8, 9, 10, 11, 4, 21] {
+                if ctx.gpio.is_pin_active_debounced(pin, active_high) {
+                    return true;
+                }
+            }
+            false
         } else {
             // Z 軸向上歸零至 d 點：檢測 d 點接近開關 (GPIO 22，支援 NC/Active-HIGH)
+            {
+                let s = ctx.state.read().unwrap();
+                if s.lim_z_d || s.lim_up {
+                    return true;
+                }
+            }
             ctx.gpio.is_pin_active_debounced(22, zd_ah) || ctx.gpio.is_pin_active_debounced(cfg.lim_pin, zd_ah)
         }
     };
@@ -680,6 +717,9 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 delay_micros(4);
                 ctx.gpio.write_pin(cfg.pul_pin, false);
                 pre_steps += 1;
+                if pre_steps % 50 == 0 {
+                    ctx.read_limit_switches();
+                }
                 delay_micros(backoff_us);
             }
             let clearance_steps = (retract_mm * cfg.steps_per_mm) as usize;
@@ -696,6 +736,14 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         }
     }
 
+    // 採集 Phase 1 尋標前的初始基準電平（動態邊緣跳變偵測保險）
+    let base_xa = ctx.gpio.read_pin(17);
+    let base_zd = ctx.gpio.read_pin(22);
+    let base_halls: Vec<(u8, bool)> = [6u8, 7, 8, 9, 10, 11, 4, 21]
+        .iter()
+        .map(|&p| (p, ctx.gpio.read_pin(p)))
+        .collect();
+
     // ── 階段 1: 快速粗搜 (Fast Seek) ──
     let seek_us = ((1_000_000.0 / homing_hz) as u64).saturating_sub(4).max(8);
     for cfg in &mut cfgs {
@@ -704,15 +752,24 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         cfg.sensor_hit = false;
     }
 
-    for _ in 0..800_000 {
+    for step_cnt in 0..800_000 {
         if ctx.homing_abort.load(Ordering::Relaxed) {
             ctx.add_history("歸零程序被中止（緊急停止）", "warn");
             return;
         }
+        if step_cnt % 50 == 0 {
+            ctx.read_limit_switches();
+        }
         let mut active_indices = Vec::new();
         for (idx, cfg) in cfgs.iter_mut().enumerate() {
             if !cfg.triggered {
-                if check_sensor(cfg) {
+                let flip_hit = if cfg.name == "x" {
+                    ctx.gpio.is_pin_flipped(17, base_xa)
+                        || base_halls.iter().any(|&(p, b)| ctx.gpio.is_pin_flipped(p, b))
+                } else {
+                    ctx.gpio.is_pin_flipped(22, base_zd)
+                };
+                if check_sensor(cfg) || flip_hit {
                     cfg.triggered = true;
                     cfg.sensor_hit = true;
                 } else {
@@ -752,6 +809,15 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         }
     }
     thread::sleep(Duration::from_millis(50));
+    ctx.read_limit_switches();
+
+    // 採集 Phase 3 慢速逼近前的基準電平（確保脫開後重採）
+    let base_xa_p3 = ctx.gpio.read_pin(17);
+    let base_zd_p3 = ctx.gpio.read_pin(22);
+    let base_halls_p3: Vec<(u8, bool)> = [6u8, 7, 8, 9, 10, 11, 4, 21]
+        .iter()
+        .map(|&p| (p, ctx.gpio.read_pin(p)))
+        .collect();
 
     // ── 階段 3: 極慢速精準捕獲邊緣 (Slow Latch) ──
     let latch_us = ((1_000_000.0 / latch_hz) as u64).saturating_sub(4).max(20);
@@ -760,15 +826,31 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         cfg.triggered = false;
     }
 
-    for _ in 0..150_000 {
+    let max_latch_steps = cfgs
+        .iter()
+        .map(|c| ((retract_mm * 2.5 * c.steps_per_mm) as usize).max(4000))
+        .max()
+        .unwrap_or(20000);
+
+    for step_cnt in 0..max_latch_steps {
         if ctx.homing_abort.load(Ordering::Relaxed) {
             return;
+        }
+        if step_cnt % 50 == 0 {
+            ctx.read_limit_switches();
         }
         let mut active_indices = Vec::new();
         for (idx, cfg) in cfgs.iter_mut().enumerate() {
             if !cfg.triggered {
-                if check_sensor(cfg) {
+                let flip_hit = if cfg.name == "x" {
+                    ctx.gpio.is_pin_flipped(17, base_xa_p3)
+                        || base_halls_p3.iter().any(|&(p, b)| ctx.gpio.is_pin_flipped(p, b))
+                } else {
+                    ctx.gpio.is_pin_flipped(22, base_zd_p3)
+                };
+                if check_sensor(cfg) || flip_hit {
                     cfg.triggered = true;
+                    cfg.sensor_hit = true;
                 } else {
                     ctx.gpio.write_pin(cfg.pul_pin, true);
                     active_indices.push(idx);
@@ -782,6 +864,8 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         for idx in active_indices {
             let cfg = &cfgs[idx];
             ctx.gpio.write_pin(cfg.pul_pin, false);
+            let cur = cfg.stepper.current_pos();
+            cfg.stepper.set_position((cur - cfg.step_val).max(0.0));
         }
         delay_micros(latch_us);
     }

@@ -1026,8 +1026,20 @@ impl AppContext {
             .count();
         s.hall_arm_metal = s.hall_group_count > 0 || s.hall_active_count > 0;
 
-        // X 軸 a 點：實體霍爾模組 (HALL_1/HALL_2/Group 1) 或接近開關 LIM_X_A (GPIO 17)
-        let hall_a_origin = s.hall_1 || s.hall_2 || s.hall_group_1;
+        // X 軸 a 點：實體霍爾模組 (HALL 1~8 全覆蓋) 或接近開關 LIM_X_A (GPIO 17)
+        let hall_a_origin = s.hall_1
+            || s.hall_2
+            || s.hall_3
+            || s.hall_4
+            || s.hall_5
+            || s.hall_6
+            || s.hall_7
+            || s.hall_8
+            || s.hall_group_1
+            || s.hall_group_2
+            || s.hall_group_3
+            || s.hall_group_4
+            || s.hall_arm_metal;
         s.lim_x_a = s.lim_x_a || hall_a_origin;
         s.lim_left = s.lim_x_a;
 

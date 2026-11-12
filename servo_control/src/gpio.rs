@@ -298,16 +298,18 @@ impl StepperMotor {
                 if motor.gpio.is_raspberry_pi {
                     let active_high = ctx.state.read().unwrap().hall_active_high;
                     if motor.name == "x" {
-                        // X 軸右側原點保護 (僅檢測 GPIO 27 LIM_X_C 接近開關)
-                        let lim_right_hit = motor.gpio.is_pin_active_low_debounced(27);
-                        if diff < 0.0 && lim_right_hit {
+                        // X 軸向左 a 點原點保護 (GPIO 17 LIM_X_A 或 A 點霍爾模組 6, 7)
+                        let lim_a_hit = motor.gpio.is_pin_active_low_debounced(17)
+                            || motor.gpio.is_pin_active_debounced(6, active_high)
+                            || motor.gpio.is_pin_active_debounced(7, active_high);
+                        if diff < 0.0 && lim_a_hit {
                             motor.halt();
-                            // 觸發右側原點立即自動校準歸零坐標點
+                            // 觸發 a 點原點立即自動校準歸零坐標點
                             motor.set_position(0.0);
                             {
                                 let mut s = ctx.state.write().unwrap();
-                                s.lim_x_c = true;
-                                s.lim_right = true;
+                                s.lim_x_a = true;
+                                s.lim_left = true;
                                 s.x_pulse = 0;
                                 s.x_mm = 0.0;
                                 s.x_pct = 0.0;
@@ -316,16 +318,14 @@ impl StepperMotor {
                             thread::sleep(Duration::from_millis(10));
                             continue;
                         }
-                        // X 軸左側 A 點極限 (GPIO 17 LIM_X_A 或 A 點霍爾模組 6, 7)
-                        let lim_a_hit = motor.gpio.is_pin_active_low_debounced(17)
-                            || motor.gpio.is_pin_active_debounced(6, active_high)
-                            || motor.gpio.is_pin_active_debounced(7, active_high);
-                        if diff > 0.0 && lim_a_hit {
+                        // X 軸向右 c 點極限 (僅檢測 GPIO 27 LIM_X_C 接近開關)
+                        let lim_c_hit = motor.gpio.is_pin_active_low_debounced(27);
+                        if diff > 0.0 && lim_c_hit {
                             motor.halt();
                             {
                                 let mut s = ctx.state.write().unwrap();
-                                s.lim_x_a = true;
-                                s.lim_left = true;
+                                s.lim_x_c = true;
+                                s.lim_right = true;
                             }
                             thread::sleep(Duration::from_millis(10));
                             continue;
@@ -368,14 +368,14 @@ impl StepperMotor {
                 } else {
                     let s = ctx.state.read().unwrap();
                     if motor.name == "x" {
-                        if diff < 0.0 && (s.lim_x_c || s.lim_right) {
+                        if diff < 0.0 && (s.lim_x_a || s.lim_left) {
                             drop(s);
                             motor.halt();
                             motor.set_position(0.0);
                             thread::sleep(Duration::from_millis(10));
                             continue;
                         }
-                        if diff > 0.0 && (s.lim_x_a || s.lim_left) {
+                        if diff > 0.0 && (s.lim_x_c || s.lim_right) {
                             drop(s);
                             motor.halt();
                             thread::sleep(Duration::from_millis(10));
@@ -429,10 +429,14 @@ impl StepperMotor {
 
                     // 步進前直接硬體讀取感測器，加入二重取樣消抖，防止電磁干擾誤煞停
                     if !dir_positive {
-                        // 往後/原點方向
+                        // 往後/原點方向 (向 a 點)
                         if motor.name == "x" {
-                            // X 軸向右 C 點移動：僅檢測 C 點接近開關 (GPIO 27)
-                            if motor.gpio.is_pin_active_low_debounced(27) {
+                            // X 軸向左 A 點移動：檢測 A 點接近開關 (GPIO 17) 與 A 點霍爾模組 (GPIO 6, 7)
+                            let ah = ctx.state.read().unwrap().hall_active_high;
+                            if motor.gpio.is_pin_active_low_debounced(17)
+                                || motor.gpio.is_pin_active_debounced(6, ah)
+                                || motor.gpio.is_pin_active_debounced(7, ah)
+                            {
                                 hit_limit_stop = true;
                                 break;
                             }
@@ -444,14 +448,10 @@ impl StepperMotor {
                             }
                         }
                     } else {
-                        // 正向/極限方向
+                        // 正向/極限方向 (向 c 點)
                         if motor.name == "x" {
-                            // X 軸向左 A 點移動：檢測 A 點接近開關 (GPIO 17) 與 A 點霍爾模組 (GPIO 6, 7)
-                            let ah = ctx.state.read().unwrap().hall_active_high;
-                            if motor.gpio.is_pin_active_low_debounced(17)
-                                || motor.gpio.is_pin_active_debounced(6, ah)
-                                || motor.gpio.is_pin_active_debounced(7, ah)
-                            {
+                            // X 軸向右 C 點移動：僅檢測 C 點接近開關 (GPIO 27)
+                            if motor.gpio.is_pin_active_low_debounced(27) {
                                 hit_limit_stop = true;
                                 break;
                             }
@@ -605,12 +605,12 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
                 stepper: Arc::clone(&ctx.x_stepper),
                 pul_pin: ctx.x_stepper.pul_pin,
                 dir_pin: ctx.x_stepper.dir_pin,
-                lim_pin: 27, // LIM_X_C (右側原點開關)
+                lim_pin: 17, // LIM_X_A (左側原點開關)
                 max_bound: x_max_mm,
                 steps_per_mm: x_spu,
                 step_val: 1.0 / x_spu,
-                seek_high: true,    // X 軸向右歸零：DIR 輸出 HIGH (正方向)
-                backoff_high: false, // 向左安全退開：DIR 輸出 LOW (負方向)
+                seek_high: false,    // X 軸向左歸零：DIR 輸出 LOW (負方向朝 a 點)
+                backoff_high: true,  // 向右安全退開：DIR 輸出 HIGH (正方向)
                 triggered: false,
                 sensor_hit: false,
             });
@@ -637,10 +637,13 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
 
     let check_sensor = |cfg: &HomingCfg| -> bool {
         if cfg.name == "x" {
-            // X 軸向右歸零至 C 點：僅檢測 C 點接近開關 (GPIO 27)
-            ctx.gpio.is_pin_active_low_debounced(27) || ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin)
+            // X 軸向左歸零至 a 點：檢測 a 點接近開關 (GPIO 17) 或 a 點霍爾模組 (GPIO 6, 7)
+            ctx.gpio.is_pin_active_low_debounced(17)
+                || ctx.gpio.is_pin_active_debounced(6, active_high)
+                || ctx.gpio.is_pin_active_debounced(7, active_high)
+                || ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin)
         } else {
-            // Z 軸向上歸零至 D 點：僅檢測 D 點接近開關 (GPIO 22)
+            // Z 軸向上歸零至 d 點：僅檢測 d 點接近開關 (GPIO 22)
             ctx.gpio.is_pin_active_low_debounced(22) || ctx.gpio.is_pin_active_low_debounced(cfg.lim_pin)
         }
     };
@@ -778,8 +781,8 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         {
             let mut s = ctx.state.write().unwrap();
             if cfg.name == "x" {
-                s.lim_x_c = true;
-                s.lim_right = true;
+                s.lim_x_a = true;
+                s.lim_left = true;
                 s.x_pulse = 0;
                 s.x_mm = 0.0;
                 s.x_pct = 0.0;
@@ -799,9 +802,9 @@ fn execute_hardware_homing(ctx: &Arc<AppContext>, target_axes: &[&str]) {
         }
         ctx.add_history(
             if cfg.name == "x" {
-                "X 軸向右霍爾模組兩段式精密歸零完成 (物理原點鎖定於右側：0.0 mm / 0 µs)".to_string()
+                "X 軸向左霍爾模組兩段式精密歸零完成 (物理原點鎖定於左側 a 點：0.0 mm / 0 µs)".to_string()
             } else {
-                "Z 軸霍爾模組兩段式精密歸零完成 (物理原點鎖定於頂部：0.0 mm / 0 µs)".to_string()
+                "Z 軸霍爾模組兩段式精密歸零完成 (物理原點鎖定於頂部 d 點：0.0 mm / 0 µs)".to_string()
             },
             "success",
         );

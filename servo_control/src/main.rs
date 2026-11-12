@@ -86,7 +86,7 @@ fn spawn_broadcast_loop(ctx: Arc<AppContext>) {
                 s.z_pulse = (z_clamped_mm * s.z_steps_per_mm).round() as i64;
 
                 // 若原點霍爾/限位處於觸發狀態或已完成歸零，強制定錨於 0 原點坐標並同步重設馬達坐標
-                if s.lim_x_c || s.lim_right {
+                if s.lim_x_a || s.lim_left {
                     s.x_pulse = 0;
                     s.x_mm = 0.0;
                     s.x_pct = 0.0;

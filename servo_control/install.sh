@@ -137,9 +137,12 @@ elif [ -d "${RUN_HOME}/Nice/.git" ]; then
     log_ok "倉庫已同步至最新 Commit: ${CURRENT_COMMIT}"
 else
     log_info "開始 Clone 倉庫至: ${REPO_DIR}"
-    mkdir -p "$REPO_DIR"
+    if [ -d "$REPO_DIR" ] && [ ! -d "$REPO_DIR/.git" ]; then
+        rm -rf "$REPO_DIR" 2>/dev/null || true
+    fi
     if [ "$EUID" -eq 0 ] && [ "$RUN_USER" != "root" ]; then
         su - "$RUN_USER" -c "git clone --branch '${REPO_BRANCH}' --depth=1 '${REPO_URL}' '${REPO_DIR}'"
+        chown -R "${RUN_USER}:${RUN_USER}" "$REPO_DIR" 2>/dev/null || true
     else
         git clone --branch "$REPO_BRANCH" --depth=1 "$REPO_URL" "$REPO_DIR"
     fi

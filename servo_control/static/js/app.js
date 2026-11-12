@@ -964,10 +964,17 @@ async function moveAxis(axis, dir) {
   if (!state.system_run) { toast('系統未啟動，請先按下 START', 'error'); return; }
   
   // 前端防撞第一道防線：若原點/霍爾感測器觸發，禁止繼續向原點後方移動
-  const hallXHit = !!(state.lim_x_a || state.lim_left || state.hall_1 || state.hall_2 || state.hall_group_1);
-  const hallZHit = !!(state.lim_z_d || state.lim_up || state.hall_3 || state.hall_4 || state.hall_group_2);
+  const enXa = state.lim_x_a_enabled !== undefined ? !!state.lim_x_a_enabled : true;
+  const enZd = state.lim_z_d_enabled !== undefined ? !!state.lim_z_d_enabled : false;
+  const enXc = state.lim_x_c_enabled !== undefined ? !!state.lim_x_c_enabled : false;
+  const hallXHit = enXa && !!(state.lim_x_a || state.lim_left || state.hall_1 || state.hall_2 || state.hall_group_1);
+  const hallZHit = enZd && !!(state.lim_z_d || state.lim_up || state.hall_3 || state.hall_4 || state.hall_group_2);
   if (axis === 'x' && dir < 0 && hallXHit) {
     toast('X 軸左側霍爾模組觸發中（已在原點），禁止繼續向左移動！', 'warn');
+    return;
+  }
+  if (axis === 'x' && dir > 0 && enXc && (state.lim_x_c || state.lim_right)) {
+    toast('X 軸右側限位觸發中，禁止繼續向右移動！', 'warn');
     return;
   }
   if (axis === 'z' && dir < 0 && hallZHit) {

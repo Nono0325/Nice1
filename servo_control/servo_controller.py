@@ -192,7 +192,7 @@ state = {
     'lim_up':    False,
     'lim_down':  False,
     'hall_metal': False,
-    'hall_active_high': True,
+    'hall_active_high': False, # 預設 NO (低電平 0V 觸發，標準 NPN 霍爾)
     'lim_x_a_enabled': True,
     'lim_x_b_enabled': True,
     'lim_x_c_enabled': False,
@@ -378,7 +378,8 @@ class StepperMotor:
                 # 即時感測器硬體防撞與原點觸發歸零保護（每次步進前直接硬體讀取）
                 if IS_RASPBERRY_PI:
                     if self.name == 'x':
-                        lim_a_hit = not GPIO.input(PIN['LIM_X_A']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2'])
+                        en_xa = bool(state.get('lim_x_a_enabled', True))
+                        lim_a_hit = en_xa and (not GPIO.input(PIN['LIM_X_A']) or not GPIO.input(PIN['HALL_1']) or not GPIO.input(PIN['HALL_2']) or bool(state.get('lim_x_a')))
                         if diff < 0 and lim_a_hit:
                             self.halt()
                             self.current_pos = 0.0
@@ -390,8 +391,9 @@ class StepperMotor:
                             state['x_homed'] = True
                             time.sleep(0.01)
                             continue
-                        xc_ah = bool(state.get('lim_x_c_active_high', True))
-                        lim_c_hit = bool(GPIO.input(PIN['LIM_X_C'])) if xc_ah else not GPIO.input(PIN['LIM_X_C'])
+                        en_xc = bool(state.get('lim_x_c_enabled', False))
+                        xc_ah = bool(state.get('lim_x_c_active_high', False))
+                        lim_c_hit = en_xc and (bool(GPIO.input(PIN['LIM_X_C'])) if xc_ah else not GPIO.input(PIN['LIM_X_C']))
                         if diff > 0 and lim_c_hit:
                             self.halt()
                             state['lim_x_c'] = True
@@ -399,8 +401,9 @@ class StepperMotor:
                             time.sleep(0.01)
                             continue
                     else: # z or y
-                        zd_ah = bool(state.get('lim_z_d_active_high', True))
-                        lim_origin_hit = bool(GPIO.input(PIN['LIM_Z_D'])) if zd_ah else not GPIO.input(PIN['LIM_Z_D'])
+                        en_zd = bool(state.get('lim_z_d_enabled', False))
+                        zd_ah = bool(state.get('lim_z_d_active_high', False))
+                        lim_origin_hit = en_zd and (bool(GPIO.input(PIN['LIM_Z_D'])) if zd_ah else not GPIO.input(PIN['LIM_Z_D']))
                         if diff < 0 and lim_origin_hit:
                             self.halt()
                             self.current_pos = 0.0
@@ -677,12 +680,18 @@ def read_limit_switches():
         # 當任一組完整觸發 (或有霍爾感應到金屬) 時，判定金屬在位
         state['hall_arm_metal'] = bool(state['hall_group_count'] > 0 or state['hall_active_count'] > 0)
 
-        # X 軸原點（a點左側）：實體霍爾模組 (HALL 1..8 全覆蓋) 或 LIM_X_A
-        state['lim_x_a'] = bool(
-            state['lim_x_a']
-            or any(state.get(f'hall_{i}') for i in range(1, 9))
-            or state.get('hall_arm_metal')
-        )
+        # X 軸原點（a點左側）：接近開關 LIM_X_A 或 a 點霍爾模組 (HALL 1/2)
+        # 嚴格隔離：不混入通用工件感測 hall_arm_metal
+        en_xa = bool(state.get('lim_x_a_enabled', True))
+        if en_xa:
+            state['lim_x_a'] = bool(
+                state.get('lim_x_a', False)
+                or state.get('hall_1', False)
+                or state.get('hall_2', False)
+                or state.get('hall_group_1', False)
+            )
+        else:
+            state['lim_x_a'] = False
         state['lim_left'] = state['lim_x_a']
         state['lim_mid'] = state['lim_x_b']
         state['lim_right'] = state['lim_x_c']
@@ -711,6 +720,17 @@ def _execute_hardware_homing(target_axes):
             backoff_dir = GPIO.HIGH  # 正方向向右退開
             step_sign = -1.0
         else: # z or y
+            if not bool(state.get('lim_z_d_enabled', False)):
+                add_history("Z 軸 d 點原點開關標記為未接線/停用，直接以當前位置作為 Z 軸原點 (0.0 mm)", "info")
+                if st:
+                    st.current_pos = 0.0
+                    st.target_pos = 0.0
+                state['z_pulse'] = 0
+                state['z_mm'] = 0.0
+                state['z_pct'] = 0.0
+                state['z_homed'] = True
+                continue
+
             lim_pin = PIN['LIM_Z_D']
             state_key = 'lim_z_d'
             home_pos = 0.0
@@ -745,18 +765,27 @@ def _execute_hardware_homing(target_axes):
     # ── 階段 A: 預先檢查 - 若原先已壓在接近開關或霍爾模組上，先慢速退開 ────
     def _is_sensor_active(c):
         if c['name'] == 'x':
+            if not bool(state.get('lim_x_a_enabled', True)):
+                return False
             xa_ah = bool(state.get('lim_x_a_active_high', False))
-            xa_hit = bool(GPIO.input(c['lim_pin'])) if xa_ah else not GPIO.input(c['lim_pin'])
-            hall_ah = bool(state.get('hall_active_high', True))
+            pin_17 = bool(GPIO.input(c['lim_pin']))
+            xa_hit = pin_17 if xa_ah else not pin_17
+            if not xa_ah and not pin_17:
+                return True
+            hall_ah = bool(state.get('hall_active_high', False))
             hall_pins = [PIN.get(f'HALL_{i}') for i in range(1, 9)]
-            hall_hit = any(
-                (bool(GPIO.input(p)) if hall_ah else not GPIO.input(p))
-                for p in hall_pins if p is not None
-            )
-            s_hit = bool(state.get('lim_x_a') or state.get('lim_left') or state.get('hall_arm_metal') or state.get('hall_active_count', 0) > 0)
-            return xa_hit or hall_hit or s_hit
-        zd_ah = bool(state.get('lim_z_d_active_high', True))
-        zd_hit = bool(GPIO.input(c['lim_pin'])) if zd_ah else not GPIO.input(c['lim_pin'])
+            for p in hall_pins:
+                if p is not None:
+                    pv = bool(GPIO.input(p))
+                    if (pv if hall_ah else not pv) or (not hall_ah and not pv):
+                        return True
+            s_hit = bool(state.get('lim_x_a') or state.get('lim_left'))
+            return xa_hit or s_hit
+        if not bool(state.get('lim_z_d_enabled', False)):
+            return False
+        zd_ah = bool(state.get('lim_z_d_active_high', False))
+        pin_22 = bool(GPIO.input(c['lim_pin']))
+        zd_hit = pin_22 if zd_ah else not pin_22
         s_hit = bool(state.get('lim_z_d') or state.get('lim_up'))
         return zd_hit or s_hit
 

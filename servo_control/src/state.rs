@@ -244,7 +244,7 @@ impl SystemState {
             hall_active_count: 0,
             hall_group_count: 0,
             hall_arm_metal: false,
-            hall_active_high: true,
+            hall_active_high: false, // 預設 NO (低電平 0V 觸發，符合標準 NPN 霍爾)
             lim_x_a_enabled: true,
             lim_x_b_enabled: true,
             lim_x_c_enabled: false, // GPIO 27 未接線，預設停用避免誤報
@@ -1076,22 +1076,15 @@ impl AppContext {
             .filter(|&&b| b)
             .count();
         s.hall_arm_metal = s.hall_group_count > 0 || s.hall_active_count > 0;
+        s.hall_metal = s.hall_arm_metal;
 
-        // X 軸 a 點：實體霍爾模組 (HALL 1~8 全覆蓋) 或接近開關 LIM_X_A (GPIO 17)
-        let hall_a_origin = s.hall_1
-            || s.hall_2
-            || s.hall_3
-            || s.hall_4
-            || s.hall_5
-            || s.hall_6
-            || s.hall_7
-            || s.hall_8
-            || s.hall_group_1
-            || s.hall_group_2
-            || s.hall_group_3
-            || s.hall_group_4
-            || s.hall_arm_metal;
-        s.lim_x_a = s.lim_x_a || hall_a_origin;
+        // X 軸 a 點原點：接近開關 LIM_X_A (GPIO 17) 或 a 點霍爾模組 (HALL 1/2)
+        // 嚴格隔離：不混入通用工件感測 hall_arm_metal，防止吸附金屬工件時誤觸發原點煞停
+        if s.lim_x_a_enabled {
+            s.lim_x_a = s.lim_x_a || s.hall_1 || s.hall_2 || s.hall_group_1;
+        } else {
+            s.lim_x_a = false;
+        }
         s.lim_left = s.lim_x_a;
 
         // X 軸 b 點：接近開關 LIM_X_B (GPIO 25)

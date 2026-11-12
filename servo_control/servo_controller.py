@@ -659,14 +659,14 @@ def _execute_hardware_homing(target_axes):
     for ax in target_axes:
         st = x_stepper if ax == 'x' else (z_stepper or y_stepper)
         if ax == 'x':
-            lim_pin = PIN['LIM_X_C']
-            state_key = 'lim_x_c'
+            lim_pin = PIN['LIM_X_A']
+            state_key = 'lim_x_a'
             home_pos = 0.0
             min_bound = 0.0
             max_bound = float(state['x_max'])
-            seek_dir = GPIO.HIGH     # 正方向向右朝 c 點歸零
-            backoff_dir = GPIO.LOW   # 負方向向左退開
-            step_sign = 1.0
+            seek_dir = GPIO.LOW      # 負方向朝 a 點歸零
+            backoff_dir = GPIO.HIGH  # 正方向退開
+            step_sign = -1.0
         else: # z or y
             lim_pin = PIN['LIM_Z_D']
             state_key = 'lim_z_d'

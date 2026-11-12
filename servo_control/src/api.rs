@@ -125,18 +125,18 @@ fn handle_ws_cmd_move(ctx: &Arc<AppContext>, data: &Value) {
     };
 
     let is_pi = ctx.is_raspberry_pi;
-    let hw_lim_xa = lim_xa || (is_pi && !ctx.gpio.read_pin(17));
-    let hw_lim_xc = lim_xc || (is_pi && (!ctx.gpio.read_pin(27) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
+    let hw_lim_xa = lim_xa || (is_pi && (!ctx.gpio.read_pin(17) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7)));
+    let hw_lim_xc = lim_xc || (is_pi && !ctx.gpio.read_pin(27));
     let hw_lim_zd = lim_zd || (is_pi && (!ctx.gpio.read_pin(22) || !ctx.gpio.read_pin(6) || !ctx.gpio.read_pin(7) || !ctx.gpio.read_pin(8) || !ctx.gpio.read_pin(9)));
     let hw_lim_ze = lim_ze || (is_pi && !ctx.gpio.read_pin(23));
 
     if axis == "x" {
-        if hw_lim_xc && delta < 0.0 {
+        if hw_lim_xa && delta < 0.0 {
             ctx.x_stepper.halt();
             ctx.x_stepper.set_position(0.0);
             return;
         }
-        if hw_lim_xa && delta > 0.0 {
+        if hw_lim_xc && delta > 0.0 {
             ctx.x_stepper.halt();
             return;
         }
@@ -200,30 +200,30 @@ pub async fn api_move(
     }));
 
     let is_pi = ctx.is_raspberry_pi;
-    let hw_lim_xa = lim_xa || (is_pi && ctx.gpio.is_pin_active_low_debounced(17));
-    let hw_lim_xc = lim_xc || (is_pi && (ctx.gpio.is_pin_active_low_debounced(27) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7)));
+    let hw_lim_xa = lim_xa || (is_pi && (ctx.gpio.is_pin_active_low_debounced(17) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7)));
+    let hw_lim_xc = lim_xc || (is_pi && ctx.gpio.is_pin_active_low_debounced(27));
     let hw_lim_zd = lim_zd || (is_pi && (ctx.gpio.is_pin_active_low_debounced(22) || ctx.gpio.is_pin_active_low_debounced(6) || ctx.gpio.is_pin_active_low_debounced(7) || ctx.gpio.is_pin_active_low_debounced(8) || ctx.gpio.is_pin_active_low_debounced(9)));
     let hw_lim_ze = lim_ze || (is_pi && ctx.gpio.is_pin_active_low_debounced(23));
 
     if axis == "x" {
         if let Some(d) = delta_mm {
-            if hw_lim_xc && d < 0.0 {
+            if hw_lim_xa && d < 0.0 {
                 ctx.x_stepper.halt();
                 ctx.x_stepper.set_position(0.0);
-                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_C"), "X 軸 c 點右側原點霍爾/限位開關觸發，坐標歸零並攔截繼續向右移動", None);
-                return Json(json!({ "ok": false, "msg": "X 軸右側原點限位觸發，已歸零並禁止繼續向右移動" }));
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_A"), "X 軸 a 點原點霍爾/限位開關觸發，坐標歸零並攔截向後移動", None);
+                return Json(json!({ "ok": false, "msg": "X 軸原點限位觸發，已歸零並禁止繼續向後移動" }));
             }
-            if hw_lim_xa && d > 0.0 {
+            if hw_lim_xc && d > 0.0 {
                 ctx.x_stepper.halt();
-                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_A"), "X 軸 a 點左側極限開關觸發，攔截移動", None);
-                return Json(json!({ "ok": false, "msg": "X 軸 a 點左側極限觸發" }));
+                ctx.add_error_log("WARN", Some("MOTION"), Some("ERR_LIMIT_X_C"), "X 軸 c 點右側限位開關觸發，攔截正向移動", None);
+                return Json(json!({ "ok": false, "msg": "X 軸 c 點右側限位觸發" }));
             }
             ctx.x_stepper.add_target_delta(d, x_min_mm, x_max_mm);
         } else if let Some(t) = target_mm {
-            if hw_lim_xc && t <= 0.0 {
+            if hw_lim_xa && t <= 0.0 {
                 ctx.x_stepper.halt();
                 ctx.x_stepper.set_position(0.0);
-                return Json(json!({ "ok": false, "msg": "X 軸已在右側原點，禁止繼續向右移動" }));
+                return Json(json!({ "ok": false, "msg": "X 軸已在原點，禁止繼續向後移動" }));
             }
             ctx.x_stepper.set_target(t, x_min_mm, x_max_mm);
         }
@@ -894,9 +894,9 @@ pub async fn api_diagnose(State(ctx): State<Arc<AppContext>>) -> impl IntoRespon
         },
         "inductive_sensors": {
             "sensor_model": "QN-1805-E1 方形 DC10-30V 三線 NPN 常開 (檢測距離 5mm)",
-            "X_A": { "pin": 17, "name": "X軸a點(向左極限)", "triggered": s.lim_x_a },
+            "X_A": { "pin": 17, "name": "X軸a點(左歸零)", "triggered": s.lim_x_a },
             "X_B": { "pin": 25, "name": "X軸b點(中間工位)", "triggered": s.lim_x_b },
-            "X_C": { "pin": 27, "name": "X軸c點(右歸零原點)", "triggered": s.lim_x_c },
+            "X_C": { "pin": 27, "name": "X軸c點(向右極限)", "triggered": s.lim_x_c },
             "Z_D": { "pin": 22, "name": "Z軸d點(向上歸零)", "triggered": s.lim_z_d },
             "Z_E": { "pin": 23, "name": "Z軸e點(向下極限)", "triggered": s.lim_z_e },
         },
